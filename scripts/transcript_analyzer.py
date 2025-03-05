@@ -285,4 +285,30 @@ class TranscriptAnalyzer:
                 content="",
                 model_used=model,
                 error=str(e)
-            ) 
+            )
+
+    async def chat_with_mistral(self, messages):
+        """Chat with Mistral model using provided messages."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.ollama_base_url}/api/chat",
+                    json={
+                        "model": "mistral",
+                        "messages": messages,
+                        "stream": False
+                    }
+                ) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        if 'message' in result:
+                            return result['message']['content']
+                        else:
+                            logger.error(f"Unexpected API response structure: {result}")
+                            raise Exception("Invalid response format from Ollama API")
+                    else:
+                        error_text = await response.text()
+                        raise Exception(f"Mistral API error: {error_text}")
+        except Exception as e:
+            logger.error(f"Error in Mistral chat: {str(e)}", exc_info=True)
+            raise 

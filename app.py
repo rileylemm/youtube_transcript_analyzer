@@ -6,6 +6,7 @@ import os
 import asyncio
 import logging
 import json
+from datetime import datetime
 
 # Configure detailed logging
 logging.basicConfig(
@@ -22,6 +23,91 @@ app = Flask(__name__)
 # Initialize transcript analyzer with OpenAI API key
 openai_api_key = os.getenv('OPENAI_API_KEY')
 analyzer = TranscriptAnalyzer(openai_api_key=openai_api_key)
+
+def load_chat_history(video_title):
+    """Load chat history for a specific video."""
+    try:
+        video_dir = analyzer._get_video_dir(video_title)
+        chat_file = os.path.join(video_dir, f"{video_title}_chat_history.json")
+        
+        if os.path.exists(chat_file):
+            with open(chat_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {"video_id": video_title, "messages": []}
+    except Exception as e:
+        logger.error(f"Error loading chat history: {str(e)}", exc_info=True)
+        return {"video_id": video_title, "messages": []}
+
+def save_chat_history(video_title, user_message, assistant_response):
+    """Save chat history for a specific video."""
+    try:
+        video_dir = analyzer._get_video_dir(video_title)
+        chat_file = os.path.join(video_dir, f"{video_title}_chat_history.json")
+        
+        # Load existing history or create new
+        history = load_chat_history(video_title)
+        
+        # Add new messages
+        timestamp = datetime.now().isoformat()
+        history["messages"].extend([
+            {
+                "role": "user",
+                "content": user_message,
+                "timestamp": timestamp
+            },
+            {
+                "role": "assistant",
+                "content": assistant_response,
+                "timestamp": timestamp
+            }
+        ])
+        
+        # Save updated history
+        with open(chat_file, 'w', encoding='utf-8') as f:
+            json.dump(history, f, indent=2, ensure_ascii=False)
+            
+    except Exception as e:
+        logger.error(f"Error saving chat history: {str(e)}", exc_info=True)
+
+async def get_video_context(video_title):
+    """Get combined context from transcript and analyses."""
+    try:
+        video_dir = analyzer._get_video_dir(video_title)
+        context = []
+        
+        # Get transcript
+        transcript_file = os.path.join(video_dir, f"{video_title}_transcript_original.json")
+        if os.path.exists(transcript_file):
+            with open(transcript_file, 'r', encoding='utf-8') as f:
+                transcript = json.load(f)
+            context.append("\n### Video Transcript:")
+            for seg in transcript:
+                minutes = int(seg['start'] // 60)
+                seconds = int(seg['start'] % 60)
+                timestamp = f"[{minutes:02d}:{seconds:02d}]"
+                context.append(f"{timestamp} {seg['text']}")
+        
+        # Get analyses
+        for filename in os.listdir(video_dir):
+            if '_analysis_' in filename and filename.endswith('.json'):
+                filepath = os.path.join(video_dir, filename)
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        analysis = json.load(f)
+                    context.append(f"\n### {analysis['type'].replace('_', ' ').title()} Analysis:")
+                    context.append(analysis['content'])
+                except Exception as e:
+                    logger.error(f"Error reading analysis file {filename}: {str(e)}")
+                    continue
+        
+        # Join all context with proper spacing
+        full_context = "\n".join(context)
+        
+        # Add video title at the start
+        return f"### Video Title: {video_title}\n\n{full_context}"
+    except Exception as e:
+        logger.error(f"Error getting video context: {str(e)}", exc_info=True)
+        return ""
 
 @app.route('/')
 def index():
@@ -290,9 +376,111 @@ async def get_analysis():
 # Add timestamp filter for Jinja templates
 @app.template_filter('timestamp')
 def format_timestamp(timestamp):
-    from datetime import datetime
     dt = datetime.fromtimestamp(timestamp)
     return dt.strftime('%Y-%m-%d %H:%M:%S')
+
+@app.route('/chat_with_video', methods=['POST'])
+async def chat_with_video():
+    try:
+        data = request.get_json()
+        video_title = data.get('video_title')
+        message = data.get('message')
+        
+        if not video_title or not message:
+            return jsonify({'error': 'Missing video title or message'}), 400
+            
+        # Get context and chat history
+        context = await get_video_context(video_title)
+        history = load_chat_history(video_title)
+        
+        # Prepare system message with context
+        system_message = (
+            "You are a helpful AI assistant discussing a YouTube video. "
+            "Below is the video's transcript and analyses. This information includes:\n"
+            "1. The video title\n"
+            "2. The full transcript with timestamps\n"
+            "3. Various analyses of the content\n\n"
+            "Use this information to answer questions about the video. "
+            "Reference specific timestamps when relevant. "
+            "If you can't find the answer in the provided context, say so clearly. "
+            "Keep responses clear and concise.\n\n"
+            f"{context}"
+        )
+        
+        # Format chat history for Mistral
+        chat_messages = [{"role": "system", "content": system_message}]
+        # Add last few messages for context (limit to keep context window manageable)
+        for msg in history["messages"][-6:]:  # Last 3 exchanges
+            chat_messages.append({"role": msg["role"], "content": msg["content"]})
+        # Add current message
+        chat_messages.append({"role": "user", "content": message})
+        
+        try:
+            # Get response from Mistral
+            response = await analyzer.chat_with_mistral(chat_messages)
+            
+            # Save to history
+            save_chat_history(video_title, message, response)
+            
+            return jsonify({'response': response})
+            
+        except Exception as e:
+            logger.error(f"Error getting Mistral response: {str(e)}", exc_info=True)
+            return jsonify({'error': f'Failed to get response: {str(e)}'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error in chat_with_video: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
+@app.route('/get_chat_history', methods=['POST'])
+async def get_chat_history():
+    try:
+        data = request.get_json()
+        video_title = data.get('video_title')
+        
+        if not video_title:
+            return jsonify({'error': 'No video title provided'}), 400
+            
+        history = load_chat_history(video_title)
+        return jsonify(history)
+        
+    except Exception as e:
+        logger.error(f"Error getting chat history: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
+@app.route('/delete_chat_message', methods=['POST'])
+async def delete_chat_message():
+    try:
+        data = request.get_json()
+        video_title = data.get('video_title')
+        timestamp = data.get('timestamp')
+        
+        if not video_title or not timestamp:
+            return jsonify({'error': 'Missing video title or timestamp'}), 400
+            
+        video_dir = analyzer._get_video_dir(video_title)
+        chat_file = os.path.join(video_dir, f"{video_title}_chat_history.json")
+        
+        try:
+            with open(chat_file, 'r', encoding='utf-8') as f:
+                history = json.load(f)
+            
+            # Remove the message pair (user message and assistant response) with the given timestamp
+            history['messages'] = [msg for msg in history['messages'] 
+                                 if msg['timestamp'] != timestamp]
+            
+            with open(chat_file, 'w', encoding='utf-8') as f:
+                json.dump(history, f, indent=2, ensure_ascii=False)
+                
+            return jsonify({'success': True})
+            
+        except Exception as e:
+            logger.error(f"Error deleting chat message: {str(e)}", exc_info=True)
+            return jsonify({'error': f'Failed to delete message: {str(e)}'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error in delete_chat_message: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 if __name__ == '__main__':
     logger.info("Starting Flask application")
