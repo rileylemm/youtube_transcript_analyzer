@@ -1,6 +1,6 @@
 # YouTube Transcript Analyzer
 
-A web application for fetching, analyzing, and extracting insights from YouTube video transcripts. Supports multiple language models (Mistral and GPT-4) for advanced analysis.
+A web application for fetching, analyzing, and extracting insights from YouTube video transcripts. Supports multiple language models (Mistral and GPT-4) for advanced analysis and interactive chat.
 
 ## Features
 
@@ -20,6 +20,13 @@ A web application for fetching, analyzing, and extracting insights from YouTube 
   - Run additional analyses directly from the library
   - Track analysis history with timestamps
   - Filter by model type (Mistral/GPT-4)
+- Interactive Chat Interface:
+  - Context-aware chat about video content
+  - Persistent chat history
+  - Message management (delete, more actions)
+  - Timestamps for all messages
+  - Clean, modern UI with dropdown menus
+  - Real-time updates and feedback
 
 ## Setup
 
@@ -65,6 +72,11 @@ python app.py
 - Run additional analyses on any video
 - Track analysis history with timestamps
 - View results from different models side by side
+- Chat with AI about video content:
+  - Ask questions about specific parts of the video
+  - Reference timestamps and analyses
+  - Manage conversation history
+  - Delete or manage messages as needed
 
 ## Project Structure
 
@@ -74,13 +86,20 @@ youtube_transcripts/
 ├── requirements.txt       # Python dependencies
 ├── scripts/
 │   ├── youtube_transcript.py    # Transcript fetching and processing
-│   └── transcript_analyzer.py   # Analysis logic for different models
+│   └── transcript_analyzer.py   # Analysis logic and chat functionality
 ├── static/
 │   └── css/              # Stylesheets
 └── templates/
     ├── index.html        # Main web interface
-    └── library.html      # Library page interface
+    └── library.html      # Library page with chat interface
 ```
+
+## Data Storage
+
+- Transcripts: Stored as JSON files in video-specific directories
+- Analyses: Saved with timestamps and model information
+- Chat History: Persistent storage with message metadata
+- All data is organized by video title for easy access
 
 ## Contributing
 
