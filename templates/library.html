@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Transcript Library</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            margin: 0;
+            color: #2c3e50;
+        }
+
+        .header a {
+            text-decoration: none;
+            color: #3498db;
+            font-weight: 500;
+        }
+
+        .video-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .video-header {
+            background-color: #f8f9fa;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e9ecef;
+            cursor: pointer;
+        }
+
+        .video-header h2 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 1.5em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .video-content {
+            padding: 20px;
+            display: none;
+        }
+
+        .video-content.show {
+            display: block;
+        }
+
+        .transcript-section {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .analysis-section {
+            margin-bottom: 15px;
+        }
+
+        .analysis-type {
+            color: #2c3e50;
+            font-weight: 500;
+            margin-bottom: 10px;
+        }
+
+        .analysis-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-left: 20px;
+        }
+
+        .analysis-item {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 10px 15px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .analysis-item:hover {
+            background-color: #e9ecef;
+        }
+
+        .model-badge {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+
+        .model-badge.mistral {
+            background-color: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .model-badge.gpt {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .timestamp {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .toggle-icon {
+            transition: transform 0.3s ease;
+        }
+
+        .toggle-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+
+        .modal-content {
+            position: relative;
+            background-color: white;
+            margin: 50px auto;
+            padding: 20px;
+            width: 90%;
+            max-width: 1000px;
+            max-height: 80vh;
+            overflow-y: auto;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .close-button {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+        }
+
+        .error-message {
+            color: #dc3545;
+            padding: 20px;
+            text-align: center;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .no-videos {
+            text-align: center;
+            padding: 40px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .analysis-tools {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .tool-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .status-message {
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+
+        .status-message.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status-message.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Transcript Library</h1>
+            <a href="/">← Back to Analyzer</a>
+        </div>
+
+        {% if error %}
+        <div class="error-message">
+            Error loading library: {{ error }}
+        </div>
+        {% endif %}
+
+        {% if not videos %}
+        <div class="no-videos">
+            <h3>No Videos Found</h3>
+            <p>Start by analyzing some videos using the main page.</p>
+        </div>
+        {% endif %}
+
+        {% for video_title, video_data in videos.items() %}
+        <div class="video-card">
+            <div class="video-header" onclick="toggleVideo(this)">
+                <h2>
+                    {{ video_title }}
+                    <span class="toggle-icon">▼</span>
+                </h2>
+            </div>
+            <div class="video-content">
+                {% if video_data.original_transcript %}
+                <div class="transcript-section">
+                    <h3>Original Transcript</h3>
+                    <div class="analysis-list">
+                        <div class="analysis-item" onclick="viewTranscript('{{ video_title }}')">
+                            <span>View Transcript</span>
+                            <span class="timestamp">{{ video_data.original_transcript.timestamp|timestamp }}</span>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="analysis-tools">
+                    <h3>Run Analysis</h3>
+                    <div class="model-selection mb-3">
+                        <label class="me-3">
+                            <input type="radio" name="model_{{ video_title|replace(' ', '_') }}" value="mistral" checked> Mistral (Local)
+                        </label>
+                        <label>
+                            <input type="radio" name="model_{{ video_title|replace(' ', '_') }}" value="gpt"> GPT-4
+                        </label>
+                    </div>
+                    <div class="tool-buttons">
+                        <button onclick="runAnalysis('{{ video_title }}', 'technical_summary')" 
+                                class="btn btn-primary me-2 mb-2">Technical Summary</button>
+                        <button onclick="runAnalysis('{{ video_title }}', 'code_snippets')"
+                                class="btn btn-primary me-2 mb-2">Extract Code & Commands</button>
+                        <button onclick="runAnalysis('{{ video_title }}', 'tools_and_resources')"
+                                class="btn btn-primary me-2 mb-2">List Tools & Resources</button>
+                        <button onclick="runAnalysis('{{ video_title }}', 'key_workflows')"
+                                class="btn btn-primary me-2 mb-2">Extract Workflows</button>
+                    </div>
+                    <div id="analysis_status_{{ video_title|replace(' ', '_') }}" class="status-message mt-3" style="display: none;"></div>
+                </div>
+
+                <div class="analyses-section">
+                    {% for analysis_type, models in video_data.analyses.items() %}
+                        {% if models.mistral or models.gpt %}
+                        <div class="analysis-section">
+                            <h3 class="analysis-type">{{ analysis_type|replace('_', ' ')|title }}</h3>
+                            <div class="analysis-list">
+                                {% for analysis in models.mistral %}
+                                <div class="analysis-item" onclick="viewAnalysis('{{ video_title }}', '{{ analysis.filepath }}')">
+                                    <span class="model-badge mistral">Mistral</span>
+                                    <span class="timestamp">{{ analysis.timestamp|timestamp }}</span>
+                                </div>
+                                {% endfor %}
+                                {% for analysis in models.gpt %}
+                                <div class="analysis-item" onclick="viewAnalysis('{{ video_title }}', '{{ analysis.filepath }}')">
+                                    <span class="model-badge gpt">GPT-4</span>
+                                    <span class="timestamp">{{ analysis.timestamp|timestamp }}</span>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Modal for viewing analysis -->
+    <div id="analysisModal" class="modal">
+        <div class="modal-content">
+            <span class="close-button" onclick="closeModal()">&times;</span>
+            <div id="modalContent" class="analysis-content"></div>
+        </div>
+    </div>
+
+    <script>
+        function toggleVideo(header) {
+            const content = header.nextElementSibling;
+            const icon = header.querySelector('.toggle-icon');
+            
+            if (content.style.display === 'none' || !content.style.display) {
+                content.style.display = 'block';
+                icon.classList.remove('collapsed');
+                icon.textContent = '▼';
+            } else {
+                content.style.display = 'none';
+                icon.classList.add('collapsed');
+                icon.textContent = '▶';
+            }
+        }
+
+        async function viewAnalysis(videoTitle, filepath) {
+            try {
+                const response = await fetch('/get_analysis', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        video_title: videoTitle,
+                        filepath: filepath
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch analysis');
+                }
+
+                const data = await response.json();
+                
+                // Format the content using marked
+                const formattedContent = formatMarkdown(data.content);
+                
+                // Display in modal
+                document.getElementById('modalContent').innerHTML = formattedContent;
+                document.getElementById('analysisModal').style.display = 'block';
+                
+            } catch (error) {
+                alert('Error loading analysis: ' + error.message);
+            }
+        }
+
+        async function viewTranscript(videoTitle) {
+            try {
+                const response = await fetch('/get_saved_transcript', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        video_title: videoTitle
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch transcript');
+                }
+
+                const data = await response.json();
+                
+                // Format transcript
+                let formattedContent = '<h2>Transcript</h2>';
+                data.segments.forEach(segment => {
+                    formattedContent += `
+                        <div class="transcript-segment">
+                            <span class="timestamp">${segment.timestamp}</span>
+                            <span class="text">${segment.text}</span>
+                        </div>
+                    `;
+                });
+                
+                // Display in modal
+                document.getElementById('modalContent').innerHTML = formattedContent;
+                document.getElementById('analysisModal').style.display = 'block';
+                
+            } catch (error) {
+                alert('Error loading transcript: ' + error.message);
+            }
+        }
+
+        function formatMarkdown(text) {
+            // Format the text for proper markdown rendering
+            let formattedText = text
+                .replace(/###\s+/g, '### ')
+                .replace(/##\s+/g, '## ')
+                .replace(/#\s+/g, '# ')
+                .replace(/- /g, '\n- ')
+                .replace(/```([^`]+)```/g, '\n```$1```\n')
+                .replace(/(\d+\.) /g, '\n$1 ')
+                .replace(/(\n[#]+[^\n]+)/g, '\n\n$1\n');
+
+            // Configure marked options
+            marked.setOptions({
+                breaks: true,
+                gfm: true,
+                headerIds: true
+            });
+            
+            // Convert markdown to HTML
+            return marked.parse(formattedText);
+        }
+
+        function closeModal() {
+            document.getElementById('analysisModal').style.display = 'none';
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('analysisModal');
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        async function runAnalysis(videoTitle, analysisType) {
+            const statusDiv = document.getElementById(`analysis_status_${videoTitle.replace(/ /g, '_')}`);
+            const modelValue = document.querySelector(`input[name="model_${videoTitle.replace(/ /g, '_')}"]:checked`).value;
+            
+            try {
+                // Show loading state
+                statusDiv.innerHTML = '<div class="loading-spinner"></div>Running analysis...';
+                statusDiv.className = 'status-message';
+                statusDiv.style.display = 'block';
+                
+                const response = await fetch('/analyze_transcript', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        video_title: videoTitle,
+                        analysis_type: analysisType,
+                        model: modelValue
+                    })
+                });
+                
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Analysis failed');
+                }
+
+                // Show success message
+                statusDiv.textContent = 'Analysis completed successfully!';
+                statusDiv.className = 'status-message success';
+                
+                // Reload the page after a short delay to show the new analysis
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+                
+            } catch (error) {
+                // Show error message
+                statusDiv.textContent = `Error: ${error.message}`;
+                statusDiv.className = 'status-message error';
+            }
+        }
+    </script>
+</body>
+</html> 

@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Transcript Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .input-section {
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        #video-url {
+            width: 70%;
+            padding: 12px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        .transcript-section {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .tools-section {
+            margin-top: 20px;
+            display: none;
+            text-align: center;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .tools-section h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .tool-group {
+            margin-bottom: 20px;
+        }
+
+        .model-select {
+            margin-bottom: 15px;
+        }
+
+        .model-select label {
+            margin-right: 10px;
+        }
+
+        .tool-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .tool-buttons button {
+            min-width: 200px;
+            margin: 5px;
+            background-color: #28a745;
+        }
+
+        .tool-buttons button:hover {
+            background-color: #218838;
+        }
+
+        .analysis-result {
+            margin-top: 20px;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: none;
+        }
+
+        .analysis-content {
+            line-height: 1.6;
+            font-size: 16px;
+            color: #2c3e50;
+        }
+
+        .analysis-content h1 {
+            font-size: 2em;
+            margin-top: 1.5em;
+            margin-bottom: 0.8em;
+            padding-bottom: 0.3em;
+            border-bottom: 1px solid #eaecef;
+        }
+
+        .analysis-content h2 {
+            font-size: 1.5em;
+            margin-top: 1.5em;
+            margin-bottom: 0.8em;
+            padding-bottom: 0.3em;
+            border-bottom: 1px solid #eaecef;
+        }
+
+        .analysis-content h3 {
+            font-size: 1.25em;
+            margin-top: 1.3em;
+            margin-bottom: 0.6em;
+        }
+
+        .analysis-content ul,
+        .analysis-content ol {
+            padding-left: 2em;
+            margin: 1em 0;
+        }
+
+        .analysis-content li {
+            margin: 0.5em 0;
+        }
+
+        .analysis-content li > p {
+            margin: 0.3em 0;
+        }
+
+        .analysis-content p {
+            margin: 1em 0;
+            line-height: 1.7;
+        }
+
+        .analysis-content code {
+            background-color: rgba(27,31,35,0.05);
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 85%;
+        }
+
+        .analysis-content pre {
+            background-color: #f6f8fa;
+            padding: 16px;
+            border-radius: 6px;
+            overflow: auto;
+            line-height: 1.45;
+            margin: 1em 0;
+        }
+
+        .analysis-content pre code {
+            background-color: transparent;
+            padding: 0;
+            border-radius: 0;
+            font-size: 100%;
+        }
+
+        .analysis-content blockquote {
+            margin: 1em 0;
+            padding: 0 1em;
+            color: #6a737d;
+            border-left: 0.25em solid #dfe2e5;
+        }
+
+        .analysis-content hr {
+            height: 0.25em;
+            padding: 0;
+            margin: 24px 0;
+            background-color: #e1e4e8;
+            border: 0;
+        }
+
+        .analysis-content table {
+            border-spacing: 0;
+            border-collapse: collapse;
+            margin: 1em 0;
+            width: 100%;
+            overflow: auto;
+        }
+
+        .analysis-content table th,
+        .analysis-content table td {
+            padding: 6px 13px;
+            border: 1px solid #dfe2e5;
+        }
+
+        .analysis-content table tr {
+            background-color: #fff;
+            border-top: 1px solid #c6cbd1;
+        }
+
+        .analysis-content table tr:nth-child(2n) {
+            background-color: #f6f8fa;
+        }
+
+        .model-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            margin-left: 10px;
+            background-color: #17a2b8;
+            color: white;
+        }
+
+        #transcript-display {
+            margin-top: 20px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .transcript-entry {
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            background-color: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .timestamp {
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 8px;
+            display: block;
+            font-weight: 500;
+        }
+
+        .transcript-text {
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
+
+        #loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        #error-message {
+            color: #dc3545;
+            text-align: center;
+            margin: 20px 0;
+            display: none;
+        }
+
+        .video-info {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            display: none;
+        }
+        
+        .video-info h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        
+        .video-info p {
+            margin: 5px 0;
+            color: #34495e;
+        }
+        
+        .status-message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        
+        .status-message.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status-message.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .transcript-box {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+        .transcript-header {
+            background-color: #f8f9fa;
+            padding: 10px 15px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .transcript-content {
+            padding: 15px;
+            display: none;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .transcript-content.show {
+            display: block;
+        }
+        .timestamp {
+            color: #666;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        .strikethrough {
+            text-decoration: line-through;
+            color: #999;
+        }
+        .correction {
+            color: #28a745;
+            margin-left: 4px;
+        }
+        .transcript-header {
+            background-color: #f8f9fa;
+            padding: 15px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .transcript-header:hover {
+            background-color: #e9ecef;
+        }
+        
+        .toggle-icon {
+            font-size: 1.2em;
+            transition: transform 0.3s ease;
+        }
+        
+        .toggle-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>YouTube Transcript Analyzer</h1>
+        
+        <div class="input-section">
+            <input type="text" id="video-url" placeholder="Enter YouTube video URL">
+            <button onclick="getTranscript()">Get Transcript</button>
+            <a href="/library" class="btn btn-outline-primary ms-3">View Library</a>
+        </div>
+
+        <div id="loading" class="loading">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Processing transcript...</p>
+        </div>
+        <div id="error-message"></div>
+
+        <div id="video-info" class="video-info">
+            <h3>Video Information</h3>
+            <p id="video-title"></p>
+            <div id="file-status" class="status-message"></div>
+        </div>
+
+        <div id="tools-section" class="tools-section" style="display: none;">
+            <h2>Analysis Tools</h2>
+            
+            <div class="model-selection">
+                <label>
+                    <input type="radio" name="model" value="mistral" checked> Mistral (Local)
+                </label>
+                <label>
+                    <input type="radio" name="model" value="gpt"> GPT-4
+                </label>
+            </div>
+            
+            <div class="tool-buttons">
+                <button onclick="analyzeTranscript('technical_summary')">Technical Summary</button>
+                <button onclick="analyzeTranscript('code_snippets')">Extract Code & Commands</button>
+                <button onclick="analyzeTranscript('tools_and_resources')">List Tools & Resources</button>
+                <button onclick="analyzeTranscript('key_workflows')">Extract Workflows</button>
+            </div>
+        </div>
+
+        <div class="transcript-section">
+            <div class="transcript-header" onclick="toggleTranscript()">
+                <h2>Transcript</h2>
+                <span class="toggle-icon">▼</span>
+            </div>
+            <div id="transcript-display" style="display: none;"></div>
+        </div>
+
+        <div id="analysis-result" class="analysis-result">
+            <div class="model-badge"></div>
+            <div class="analysis-content"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentVideoTitle = null;
+        
+        async function getTranscript() {
+            const videoUrl = document.getElementById('video-url').value;
+            if (!videoUrl) {
+                showError('Please enter a YouTube video URL');
+                return;
+            }
+
+            showLoading(true);
+            hideError();
+
+            try {
+                const response = await fetch('/get_transcript', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ video_url: videoUrl })
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to get transcript');
+                }
+
+                // Update video info
+                document.querySelector('.video-info').style.display = 'block';
+                document.querySelector('.video-info h3').textContent = data.title;
+
+                // Display transcript
+                const transcriptDisplay = document.getElementById('transcript-display');
+                transcriptDisplay.innerHTML = '';
+                
+                data.transcript.segments.forEach(segment => {
+                    const entry = document.createElement('div');
+                    entry.className = 'transcript-entry';
+                    entry.innerHTML = `
+                        <span class="timestamp">${segment.timestamp}</span>
+                        <span class="transcript-text">${segment.text}</span>
+                    `;
+                    transcriptDisplay.appendChild(entry);
+                });
+
+                // Show transcript and tools sections
+                document.querySelector('.transcript-section').style.display = 'block';
+                document.querySelector('.tools-section').style.display = 'block';
+                document.getElementById('transcript-display').style.display = 'block';
+                document.querySelector('.toggle-icon').textContent = '▼';
+                document.querySelector('.toggle-icon').classList.remove('collapsed');
+                
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        async function analyzeTranscript(analysisType) {
+            const videoTitle = document.querySelector('.video-info h3').textContent;
+            if (!videoTitle) {
+                showError('Please get a transcript first');
+                return;
+            }
+            
+            const model = document.querySelector('input[name="model"]:checked').value;
+            
+            try {
+                const response = await fetch('/analyze_transcript', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        video_title: videoTitle,
+                        analysis_type: analysisType,
+                        model: model
+                    })
+                });
+                
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Analysis failed');
+                }
+
+                displayAnalysisResult(data.analysis, model);
+                
+                showStatus(`Analysis completed successfully`, 'success');
+            } catch (error) {
+                showError('Error during analysis: ' + error.message);
+            }
+        }
+        
+        function showError(message) {
+            showStatus(message, 'error');
+        }
+        
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('file-status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status-message ${type}`;
+            statusDiv.style.display = 'block';
+            
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        function showLoading(show) {
+            const loadingDiv = document.getElementById('loading');
+            if (show) {
+                loadingDiv.style.display = 'block';
+            } else {
+                loadingDiv.style.display = 'none';
+            }
+        }
+
+        function hideError() {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = '';
+            errorDiv.style.display = 'none';
+        }
+
+        function toggleTranscript() {
+            const display = document.getElementById('transcript-display');
+            const icon = document.querySelector('.toggle-icon');
+            
+            if (display.style.display === 'none') {
+                display.style.display = 'block';
+                icon.classList.remove('collapsed');
+                icon.textContent = '▼';
+            } else {
+                display.style.display = 'none';
+                icon.classList.add('collapsed');
+                icon.textContent = '▶';
+            }
+        }
+
+        function displayAnalysisResult(result, model) {
+            const analysisResult = document.getElementById('analysis-result');
+            const modelBadge = model === 'mistral' ? 'Mistral (Local)' : 'GPT-4';
+            
+            // Format the text for proper markdown rendering
+            let formattedText = result
+                // Replace ### with proper markdown headers
+                .replace(/###\s+/g, '### ')
+                // Replace ## with proper markdown headers
+                .replace(/##\s+/g, '## ')
+                // Replace # with proper markdown headers
+                .replace(/#\s+/g, '# ')
+                // Add proper spacing for bullet points
+                .replace(/- /g, '\n- ')
+                // Format code blocks
+                .replace(/```([^`]+)```/g, '\n```$1```\n')
+                // Add proper spacing for numbered lists
+                .replace(/(\d+\.) /g, '\n$1 ')
+                // Add proper spacing around sections
+                .replace(/(\n[#]+[^\n]+)/g, '\n\n$1\n');
+
+            // Configure marked options for better rendering
+            marked.setOptions({
+                breaks: true,
+                gfm: true,
+                headerIds: true
+            });
+            
+            // Convert the markdown to HTML
+            const htmlContent = marked.parse(formattedText);
+            
+            analysisResult.innerHTML = `
+                <div class="model-badge">${modelBadge}</div>
+                <div class="analysis-content">${htmlContent}</div>
+            `;
+            
+            analysisResult.style.display = 'block';
+            
+            // Add syntax highlighting for code blocks
+            document.querySelectorAll('pre code').forEach((block) => {
+                block.style.backgroundColor = '#f8f9fa';
+                block.style.padding = '1em';
+                block.style.borderRadius = '4px';
+                block.style.display = 'block';
+                block.style.overflow = 'auto';
+            });
+        }
+    </script>
+</body>
+</html> 
