@@ -19,39 +19,180 @@ import argparse
 import logging
 import ssl
 import certifi
+import os
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-def extract_video_id(url: str) -> Optional[str]:
-    """
-    Extract the video ID from a YouTube URL.
+async def extract_video_id(url: str) -> str:
+    """Extract video ID from various YouTube URL formats."""
+    # Handle different URL formats
+    if 'youtu.be' in url:
+        return url.split('/')[-1]
     
-    Args:
-        url: YouTube video URL in various formats
-        
-    Returns:
-        str: Video ID if found, None otherwise
-    """
-    logger.debug(f"Extracting video ID from URL: {url}")
-    try:
-        parsed_url = urlparse(url)
-        if parsed_url.hostname in ('youtu.be', 'www.youtu.be'):
-            video_id = parsed_url.path[1:]
-        elif parsed_url.hostname in ('youtube.com', 'www.youtube.com'):
-            if parsed_url.path == '/watch':
-                video_id = parse_qs(parsed_url.query)['v'][0]
-            else:
-                return None
-        else:
-            return None
-            
-        logger.info(f"Successfully extracted video ID: {video_id}")
-        return video_id
-    except Exception as e:
-        logger.error(f"Error extracting video ID: {str(e)}", exc_info=True)
-        return None
+    parsed_url = urlparse(url)
+    if 'youtube.com' in parsed_url.netloc:
+        if 'watch' in parsed_url.path:
+            return parse_qs(parsed_url.query)['v'][0]
+        elif 'embed' in parsed_url.path:
+            return parsed_url.path.split('/')[-1]
+    
+    raise ValueError("Invalid YouTube URL format")
 
+async def get_video_metadata(video_id: str) -> Dict:
+    """
+    Fetch video metadata using YouTube's oEmbed API and additional data from the video page.
+    """
+    try:
+        # First get basic metadata using oEmbed API
+        oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(oembed_url) as response:
+                if response.status == 200:
+                    oembed_data = await response.json()
+                else:
+                    raise Exception(f"Failed to fetch oEmbed data: {await response.text()}")
+
+        # Now get additional metadata from the video page
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(video_url, headers=headers) as response:
+                if response.status == 200:
+                    html = await response.text()
+                    
+                    # Extract additional metadata using regex patterns
+                    view_count_match = re.search(r'"viewCount":"(\d+)"', html)
+                    publish_date_match = re.search(r'"publishDate":"([^"]+)"', html)
+                    channel_id_match = re.search(r'"channelId":"([^"]+)"', html)
+                    description_match = re.search(r'"description":{"simpleText":"([^"]+)"', html)
+                    
+                    # Combine all metadata
+                    metadata = {
+                        'video_id': video_id,
+                        'title': oembed_data.get('title'),
+                        'channel_name': oembed_data.get('author_name'),
+                        'channel_url': oembed_data.get('author_url'),
+                        'thumbnail_url': f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",  # High quality thumbnail
+                        'thumbnail_url_hq': f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
+                        'thumbnail_url_mq': f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+                        'thumbnail_url_default': f"https://i.ytimg.com/vi/{video_id}/default.jpg",
+                        'view_count': int(view_count_match.group(1)) if view_count_match else None,
+                        'publish_date': publish_date_match.group(1) if publish_date_match else None,
+                        'channel_id': channel_id_match.group(1) if channel_id_match else None,
+                        'description': description_match.group(1) if description_match else None,
+                        'html': oembed_data.get('html'),  # Embed HTML
+                        'provider_name': oembed_data.get('provider_name'),
+                        'provider_url': oembed_data.get('provider_url'),
+                        'fetched_at': datetime.now().isoformat(),
+                    }
+                    
+                    # Download thumbnails
+                    async with aiohttp.ClientSession() as session:
+                        for quality in ['default', 'mq', 'hq']:
+                            thumb_url = metadata[f'thumbnail_url_{quality}']
+                            try:
+                                async with session.get(thumb_url) as thumb_response:
+                                    if thumb_response.status == 200:
+                                        metadata[f'thumbnail_{quality}_available'] = True
+                                    else:
+                                        metadata[f'thumbnail_{quality}_available'] = False
+                            except Exception as e:
+                                logger.error(f"Error checking thumbnail {quality}: {str(e)}")
+                                metadata[f'thumbnail_{quality}_available'] = False
+                    
+                    return metadata
+                else:
+                    raise Exception(f"Failed to fetch video page: {response.status}")
+                    
+    except Exception as e:
+        logger.error(f"Error fetching video metadata: {str(e)}")
+        raise
+
+async def get_video_title(url: str) -> str:
+    """Get the title of a YouTube video."""
+    try:
+        video_id = await extract_video_id(url)
+        metadata = await get_video_metadata(video_id)
+        return metadata['title']
+    except Exception as e:
+        logger.error(f"Error getting video title: {str(e)}")
+        raise
+
+async def get_transcript(url: str) -> Tuple[List[Dict], Dict]:
+    """
+    Get transcript and metadata for a YouTube video.
+    Returns a tuple of (transcript, metadata).
+    """
+    try:
+        video_id = await extract_video_id(url)
+        
+        # Get transcript
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        
+        # Get metadata
+        metadata = await get_video_metadata(video_id)
+        
+        return transcript, metadata
+        
+    except Exception as e:
+        logger.error(f"Error getting transcript: {str(e)}")
+        raise
+
+async def save_video_metadata(metadata: Dict, video_dir: str) -> str:
+    """Save video metadata to a file."""
+    try:
+        os.makedirs(video_dir, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{timestamp}__metadata__{metadata['video_id']}.json"
+        filepath = os.path.join(video_dir, filename)
+        
+        # Simplify thumbnail URLs to just store the best available version
+        thumbnail_url = metadata['thumbnail_url_hq']  # Try high quality first
+        if not await check_thumbnail_availability(thumbnail_url):
+            thumbnail_url = metadata['thumbnail_url_mq']  # Fall back to medium quality
+            if not await check_thumbnail_availability(thumbnail_url):
+                thumbnail_url = metadata['thumbnail_url_default']  # Fall back to default
+        
+        # Update metadata with single thumbnail URL and video URL
+        metadata['thumbnail_url'] = thumbnail_url
+        metadata['video_url'] = f"https://www.youtube.com/watch?v={metadata['video_id']}"
+        
+        # Remove redundant thumbnail URLs
+        for key in ['thumbnail_url_hq', 'thumbnail_url_mq', 'thumbnail_url_default']:
+            metadata.pop(key, None)
+        
+        # Save metadata
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
+            
+        # Save single thumbnail
+        thumb_filename = f"{timestamp}__thumbnail__{metadata['video_id']}.jpg"
+        thumb_path = os.path.join(video_dir, thumb_filename)
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(thumbnail_url) as response:
+                if response.status == 200:
+                    with open(thumb_path, 'wb') as f:
+                        f.write(await response.read())
+        
+        return filepath
+        
+    except Exception as e:
+        logger.error(f"Error saving video metadata: {str(e)}")
+        raise
+
+async def check_thumbnail_availability(url: str) -> bool:
+    """Check if a thumbnail URL is available."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                return response.status == 200
+    except Exception:
+        return False
 
 def get_best_transcript(video_id: str, lang: str = 'en') -> List[Dict]:
     """
@@ -185,73 +326,6 @@ def group_transcript_segments(transcript_list: List[Dict]) -> List[Dict]:
     return grouped_segments
 
 
-async def get_video_title(video_url: str) -> str:
-    """
-    Get the title of a YouTube video using oEmbed.
-    This method doesn't require an API key.
-    
-    Args:
-        video_url: YouTube video URL
-        
-    Returns:
-        str: Video title, or video ID if title cannot be fetched
-    """
-    logger.debug(f"Fetching title for video URL: {video_url}")
-    video_id = extract_video_id(video_url)
-    if not video_id:
-        logger.warning("Could not extract video ID from URL")
-        return "Unknown Video"
-        
-    try:
-        # Use YouTube's oEmbed endpoint to get video information
-        oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
-        
-        # Create SSL context with certifi certificates
-        ssl_context = ssl.create_default_context(cafile=certifi.where())
-        
-        connector = aiohttp.TCPConnector(ssl=ssl_context)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.get(oembed_url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    title = data['title']
-                    # Clean the title to make it filesystem-friendly
-                    title = re.sub(r'[<>:"/\\|?*]', '', title)  # Remove invalid filename characters
-                    title = re.sub(r'\s+', '_', title)          # Replace spaces with underscores
-                    logger.info(f"Successfully fetched video title: {title}")
-                    return title
-                else:
-                    logger.warning(f"Failed to fetch video title. Status: {response.status}")
-                    return video_id
-    except Exception as e:
-        logger.error(f"Error fetching video title: {str(e)}", exc_info=True)
-        return video_id
-
-
-async def get_transcript(video_url: str, lang: str = 'en') -> List[Dict]:
-    """
-    Fetch and format transcript for a YouTube video.
-    Gets the best available transcript and applies formatting improvements.
-    """
-    video_id = extract_video_id(video_url)
-    if not video_id:
-        raise ValueError("Invalid YouTube URL")
-    
-    try:
-        # Get the best available transcript
-        # Run the synchronous YouTubeTranscriptApi calls in a thread pool
-        transcript_list = await asyncio.to_thread(get_best_transcript, video_id, lang)
-        
-        # Group and format the transcript segments
-        grouped_transcript = group_transcript_segments(transcript_list)
-        
-        return grouped_transcript
-        
-    except Exception as e:
-        print(f"Error fetching transcript: {str(e)}")
-        raise
-
-
 async def save_transcript(transcript_data: Dict, output_dir: str = 'transcripts') -> str:
     """
     Save transcript data to a JSON file.
@@ -263,8 +337,6 @@ async def save_transcript(transcript_data: Dict, output_dir: str = 'transcripts'
     Returns:
         str: Path to the saved file
     """
-    import os
-    
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
     

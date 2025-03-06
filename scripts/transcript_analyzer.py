@@ -28,6 +28,30 @@ class AnalysisResult:
     model_used: str
     error: Optional[str] = None
 
+def sanitize_filename(name):
+    """Convert a string to a safe filename."""
+    # Replace spaces and special chars with underscores
+    safe_name = "".join(c if c.isalnum() else '_' for c in name)
+    # Remove consecutive underscores
+    safe_name = '_'.join(filter(None, safe_name.split('_')))
+    return safe_name.lower()
+
+def get_timestamp_prefix():
+    """Get current timestamp in YYYYMMDD_HHMMSS format."""
+    return datetime.now().strftime('%Y%m%d_%H%M%S')
+
+def generate_transcript_filename(video_title):
+    """Generate consistent filename for transcripts."""
+    safe_title = sanitize_filename(video_title)
+    return f"{get_timestamp_prefix()}__transcript__{safe_title}.json"
+
+def generate_analysis_filename(video_title, analysis_type, model):
+    """Generate consistent filename for analyses."""
+    safe_title = sanitize_filename(video_title)
+    safe_type = sanitize_filename(analysis_type)
+    safe_model = sanitize_filename(model)
+    return f"{get_timestamp_prefix()}__analysis__{safe_type}__{safe_model}__{safe_title}.json"
+
 class TranscriptAnalyzer:
     def __init__(self, ollama_base_url: str = "http://localhost:11434", openai_api_key: Optional[str] = None):
         """
@@ -39,7 +63,7 @@ class TranscriptAnalyzer:
         """
         self.ollama_base_url = ollama_base_url
         self.openai_api_key = openai_api_key
-        self.data_dir = "data"
+        self.data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
         
         # Create data directory if it doesn't exist
         os.makedirs(self.data_dir, exist_ok=True)
@@ -53,42 +77,50 @@ class TranscriptAnalyzer:
             self.openai_client = None
         
     def _get_video_dir(self, video_title: str) -> str:
-        """Get the directory path for a specific video."""
-        # Replace invalid characters in video title
-        safe_title = "".join(c for c in video_title if c.isalnum() or c in (' ', '-', '_')).strip()
-        return os.path.join(self.data_dir, safe_title)
+        """Get or create directory for video data."""
+        safe_title = sanitize_filename(video_title)
+        video_dir = os.path.join(self.data_dir, safe_title)
+        os.makedirs(video_dir, exist_ok=True)
+        return video_dir
 
     async def save_original_transcript(self, transcript: List[Dict], video_title: str) -> str:
-        """Save the original transcript to a file."""
-        video_dir = self._get_video_dir(video_title)
-        os.makedirs(video_dir, exist_ok=True)
-        
-        filepath = os.path.join(video_dir, f"{video_title}_transcript_original.json")
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(transcript, f, indent=2, ensure_ascii=False)
-        
-        return filepath
+        """Save original transcript to JSON file."""
+        try:
+            video_dir = self._get_video_dir(video_title)
+            filename = generate_transcript_filename(video_title)
+            filepath = os.path.join(video_dir, filename)
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(transcript, f, ensure_ascii=False, indent=2)
+                
+            return filepath
+            
+        except Exception as e:
+            logger.error(f"Error saving transcript: {str(e)}", exc_info=True)
+            raise
 
-    async def save_analysis(self, analysis: str, video_title: str, analysis_type: str, model: str = "mistral") -> str:
-        """Save the analysis result to a file."""
-        video_dir = self._get_video_dir(video_title)
-        os.makedirs(video_dir, exist_ok=True)
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_prefix = f"{model}_"  # Always include model name in filename
-        filename = f"{video_title}_{model_prefix}analysis_{analysis_type}_{timestamp}.json"
-        filepath = os.path.join(video_dir, filename)
-        
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump({
-                'title': video_title,
+    async def save_analysis(self, analysis_content: str, video_title: str, analysis_type: str, model: str = "mistral") -> str:
+        """Save analysis results to JSON file."""
+        try:
+            video_dir = self._get_video_dir(video_title)
+            filename = generate_analysis_filename(video_title, analysis_type, model)
+            filepath = os.path.join(video_dir, filename)
+            
+            analysis_data = {
                 'type': analysis_type,
                 'model': model,
-                'timestamp': timestamp,
-                'content': analysis
-            }, f, indent=2, ensure_ascii=False)
-        
-        return filepath
+                'content': analysis_content,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(analysis_data, f, ensure_ascii=False, indent=2)
+                
+            return filepath
+            
+        except Exception as e:
+            logger.error(f"Error saving analysis: {str(e)}", exc_info=True)
+            raise
 
     async def analyze_with_mistral(self, transcript: List[Dict], analysis_type: str) -> str:
         """Analyze the transcript using Mistral model."""
@@ -102,37 +134,41 @@ class TranscriptAnalyzer:
 
         system_messages = {
             "technical_summary": (
-                "Summarize the video's technical content with a focus on:\n"
-                "- Core concepts discussed.\n"
-                "- Methodologies used or proposed.\n"
-                "- Key takeaways that someone should remember.\n"
-                "- Any notable insights that differentiate this content from common knowledge.\n\n"
-                "Organize the summary into clear sections with concise bullet points for readability."
+                "You are an expert in AI and LLM technology analysis. Your task is to create a focused summary of the video's technical content about LLMs and AI, specifically addressing:\n"
+                "1. Core LLM/AI concepts and techniques discussed\n"
+                "2. Specific implementation details and best practices\n"
+                "3. Unique insights about LLM usage and capabilities\n"
+                "4. Practical applications and limitations mentioned\n"
+                "5. Technical challenges and solutions presented\n\n"
+                "Format the output with clear headings and concise bullet points.\n"
+                "Focus only on the most valuable technical insights about LLM technology."
             ),
             "code_snippets": (
-                "Extract all code snippets and provide:\n"
-                "1. The exact code (if present in transcription).\n"
-                "2. The purpose of the code in the given context.\n"
-                "3. A step-by-step explanation of how it works.\n"
-                "4. Any assumptions or dependencies needed to run it.\n"
-                "5. Best practices or optimizations if relevant.\n\n"
-                "Ensure explanations are precise and useful for implementation."
+                "Extract and analyze code related to LLM implementation and usage. For each code snippet:\n"
+                "1. Identify the specific LLM-related functionality (e.g., prompt engineering, API calls, etc.)\n"
+                "2. Explain the technical implementation details\n"
+                "3. Highlight best practices for LLM integration\n"
+                "4. Note any performance considerations or limitations\n"
+                "5. Suggest potential improvements or alternatives\n\n"
+                "Focus on code that directly interfaces with or supports LLM functionality."
             ),
             "tools_and_resources": (
-                "Extract and list all tools, libraries, frameworks, and resources mentioned.\n"
-                "For each, include:\n"
-                "- The name and a brief description of what it does.\n"
-                "- Why it was mentioned (e.g., problem it solves, improvement it provides).\n"
-                "- Any links given or well-known official resources.\n"
-                "- Common alternatives (if applicable)."
+                "Identify all LLM-related tools, libraries, and resources mentioned. For each:\n"
+                "1. Specific role in LLM implementation or usage\n"
+                "2. Technical capabilities and limitations\n"
+                "3. Integration requirements and compatibility\n"
+                "4. Performance characteristics and scaling considerations\n"
+                "5. Alternatives and trade-offs discussed\n\n"
+                "Focus on tools that are directly relevant to LLM development and deployment."
             ),
             "key_workflows": (
-                "Identify and outline all workflows, methodologies, and structured processes mentioned.\n"
-                "For each:\n"
-                "1. Provide a step-by-step breakdown in bullet points.\n"
-                "2. Highlight any dependencies or prerequisites.\n"
-                "3. Note any best practices or warnings.\n"
-                "4. If the workflow improves efficiency or solves a specific problem, explain how."
+                "Document workflows and processes specific to LLM implementation and usage:\n"
+                "1. Step-by-step procedures for LLM integration\n"
+                "2. Best practices for prompt engineering\n"
+                "3. Testing and validation approaches\n"
+                "4. Performance optimization techniques\n"
+                "5. Error handling and edge cases\n\n"
+                "Emphasize practical, actionable workflows for LLM development."
             )
         }
         
@@ -179,44 +215,41 @@ class TranscriptAnalyzer:
         
         system_messages = {
             "technical_summary": (
-                "You are an expert in technical content analysis. Your goal is to extract only the most valuable insights from the video.\n\n"
-                "Summarize the content with a focus on:\n"
-                "- The most critical concepts, methodologies, and techniques.\n"
-                "- Unique or advanced insights beyond basic knowledge.\n"
-                "- Real-world applications mentioned.\n"
-                "- Key takeaways that should be remembered.\n\n"
-                "Format the output into sections with bullet points for clarity.\n"
-                "Avoid unnecessary details—focus on actionable knowledge."
+                "You are an expert in AI and LLM technology analysis. Your task is to create a focused summary of the video's technical content about LLMs and AI, specifically addressing:\n"
+                "1. Core LLM/AI concepts and techniques discussed\n"
+                "2. Specific implementation details and best practices\n"
+                "3. Unique insights about LLM usage and capabilities\n"
+                "4. Practical applications and limitations mentioned\n"
+                "5. Technical challenges and solutions presented\n\n"
+                "Format the output with clear headings and concise bullet points.\n"
+                "Focus only on the most valuable technical insights about LLM technology."
             ),
             "code_snippets": (
-                "You are a code extraction and explanation expert.\n\n"
-                "Extract all code snippets and provide:\n"
-                "1. The full code (if available in the transcript).\n"
-                "2. What the code does and why it matters.\n"
-                "3. A step-by-step breakdown of its logic.\n"
-                "4. Best practices, potential pitfalls, and optimizations.\n"
-                "5. Any related concepts or frameworks necessary for implementation.\n\n"
-                "Your goal is to provide quick, actionable insights for a developer reviewing this information."
+                "Extract and analyze code related to LLM implementation and usage. For each code snippet:\n"
+                "1. Identify the specific LLM-related functionality (e.g., prompt engineering, API calls, etc.)\n"
+                "2. Explain the technical implementation details\n"
+                "3. Highlight best practices for LLM integration\n"
+                "4. Note any performance considerations or limitations\n"
+                "5. Suggest potential improvements or alternatives\n\n"
+                "Focus on code that directly interfaces with or supports LLM functionality."
             ),
             "tools_and_resources": (
-                "You are a technical resource curator.\n\n"
-                "Extract all tools, libraries, and frameworks mentioned in the video and provide:\n"
-                "- Name\n"
-                "- What it does\n"
-                "- Why it was mentioned (e.g., advantage over alternatives, use case)\n"
-                "- Links if provided\n"
-                "- Related or competing technologies\n\n"
-                "Focus on practical utility—omit anything that is just a passing mention without real significance."
+                "Identify all LLM-related tools, libraries, and resources mentioned. For each:\n"
+                "1. Specific role in LLM implementation or usage\n"
+                "2. Technical capabilities and limitations\n"
+                "3. Integration requirements and compatibility\n"
+                "4. Performance characteristics and scaling considerations\n"
+                "5. Alternatives and trade-offs discussed\n\n"
+                "Focus on tools that are directly relevant to LLM development and deployment."
             ),
             "key_workflows": (
-                "You are a workflow and methodology analyst.\n\n"
-                "Identify and break down all key workflows and structured processes discussed in the video.\n"
-                "For each:\n"
-                "1. Provide a step-by-step breakdown with clear formatting.\n"
-                "2. Identify critical decisions, optimizations, or best practices.\n"
-                "3. Highlight common mistakes, pitfalls, or challenges.\n"
-                "4. If a workflow improves efficiency or solves a specific problem, explain how and why.\n\n"
-                "Your goal is to help someone understand and apply the process immediately."
+                "Document workflows and processes specific to LLM implementation and usage:\n"
+                "1. Step-by-step procedures for LLM integration\n"
+                "2. Best practices for prompt engineering\n"
+                "3. Testing and validation approaches\n"
+                "4. Performance optimization techniques\n"
+                "5. Error handling and edge cases\n\n"
+                "Emphasize practical, actionable workflows for LLM development."
             )
         }
         
@@ -287,14 +320,14 @@ class TranscriptAnalyzer:
                 error=str(e)
             )
 
-    async def chat_with_mistral(self, messages):
+    async def chat_with_mistral(self, messages: List[Dict]) -> str:
         """Chat with Mistral model using provided messages."""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self.ollama_base_url}/api/chat",
                     json={
-                        "model": "mistral",
+                        "model": "mistral-base",
                         "messages": messages,
                         "stream": False
                     }
@@ -304,11 +337,12 @@ class TranscriptAnalyzer:
                         if 'message' in result:
                             return result['message']['content']
                         else:
-                            logger.error(f"Unexpected API response structure: {result}")
-                            raise Exception("Invalid response format from Ollama API")
+                            logger.error(f"Unexpected API response format: {result}")
+                            raise Exception("Unexpected API response format")
                     else:
                         error_text = await response.text()
                         raise Exception(f"Mistral API error: {error_text}")
+                        
         except Exception as e:
-            logger.error(f"Error in Mistral chat: {str(e)}", exc_info=True)
-            raise 
+            logger.error(f"Error in chat_with_mistral: {str(e)}")
+            raise Exception(f"Error chatting with Mistral: {str(e)}") 

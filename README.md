@@ -20,8 +20,21 @@ A web application for fetching, analyzing, and extracting insights from YouTube 
   - Run additional analyses directly from the library
   - Track analysis history with timestamps
   - Filter by model type (Mistral/GPT-4)
+- Detailed Individual Video Pages:
+  - Clean, organized transcript view with minute-based timestamps
+  - Video metadata and statistics
+  - Direct link to YouTube video
+  - Channel information and view count
+  - Tabbed interface for transcript, analyses, and chat
+  - Real-time analysis generation
+- Enhanced LLM Analysis:
+  - Focused LLM prompts for better technical insights
+  - Specialized analysis for LLM-related content
+  - Improved context handling for more relevant responses
+  - Structured output with clear sections and bullet points
 - Interactive Chat Interface:
   - Context-aware chat about video content
+  - Smart context filtering for LLM-related content
   - Persistent chat history
   - Message management (delete, more actions)
   - Timestamps for all messages
@@ -72,11 +85,14 @@ python app.py
 - Run additional analyses on any video
 - Track analysis history with timestamps
 - View results from different models side by side
-- Chat with AI about video content:
-  - Ask questions about specific parts of the video
-  - Reference timestamps and analyses
-  - Manage conversation history
-  - Delete or manage messages as needed
+
+6. Individual Video Pages:
+- Click on any video title to access its dedicated page
+- View organized transcript with minute-based timestamps
+- Access video metadata and statistics
+- Generate new analyses in real-time
+- Chat with AI about specific video content
+- Watch the original video on YouTube
 
 ## Project Structure
 
@@ -86,12 +102,15 @@ youtube_transcripts/
 ├── requirements.txt       # Python dependencies
 ├── scripts/
 │   ├── youtube_transcript.py    # Transcript fetching and processing
-│   └── transcript_analyzer.py   # Analysis logic and chat functionality
+│   ├── transcript_analyzer.py   # Analysis logic and chat functionality
+│   └── migrate_filenames.py     # Data migration utilities
 ├── static/
 │   └── css/              # Stylesheets
 └── templates/
     ├── index.html        # Main web interface
-    └── library.html      # Library page with chat interface
+    ├── library.html      # Library page
+    ├── video_page.html   # Individual video page
+    └── error.html        # Error page template
 ```
 
 ## Data Storage
@@ -99,6 +118,7 @@ youtube_transcripts/
 - Transcripts: Stored as JSON files in video-specific directories
 - Analyses: Saved with timestamps and model information
 - Chat History: Persistent storage with message metadata
+- Video Metadata: Includes thumbnails, channel info, and statistics
 - All data is organized by video title for easy access
 
 ## Contributing
