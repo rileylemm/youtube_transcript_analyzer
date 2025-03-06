@@ -259,15 +259,21 @@
 
         .timestamp {
             color: #666;
-            font-size: 0.9em;
+            font-size: 0.85em;
             margin-bottom: 8px;
-            display: block;
-            font-weight: 500;
+            display: inline-block;
+            font-family: monospace;
+            background-color: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 4px;
         }
 
         .transcript-text {
             white-space: pre-wrap;
             line-height: 1.6;
+            margin-top: 8px;
+            color: #2c3e50;
+            font-size: 1.1em;
         }
 
         #loading {
@@ -472,22 +478,10 @@
                 }
 
                 // Update video info
-                document.querySelector('.video-info').style.display = 'block';
-                document.querySelector('.video-info h3').textContent = data.title;
+                displayVideoInfo(data);
 
-                // Display transcript
-                const transcriptDisplay = document.getElementById('transcript-display');
-                transcriptDisplay.innerHTML = '';
-                
-                data.transcript.segments.forEach(segment => {
-                    const entry = document.createElement('div');
-                    entry.className = 'transcript-entry';
-                    entry.innerHTML = `
-                        <span class="timestamp">${segment.timestamp}</span>
-                        <span class="transcript-text">${segment.text}</span>
-                    `;
-                    transcriptDisplay.appendChild(entry);
-                });
+                // Display transcript using the new function
+                displayTranscript(data.transcript.segments);
 
                 // Show transcript and tools sections
                 document.querySelector('.transcript-section').style.display = 'block';
@@ -628,6 +622,39 @@
                 block.style.borderRadius = '4px';
                 block.style.display = 'block';
                 block.style.overflow = 'auto';
+            });
+        }
+
+        function displayVideoInfo(data) {
+            const videoInfoDiv = document.getElementById('video-info');
+            videoInfoDiv.innerHTML = `
+                <h2>${data.title}</h2>
+                <div class="video-metadata">
+                    <img src="${data.metadata.thumbnail_url}" alt="${data.title}" class="video-thumbnail">
+                    <div class="metadata-text">
+                        <p><strong>Channel:</strong> <a href="${data.metadata.channel_url}" target="_blank">${data.metadata.channel_name}</a></p>
+                        <p><strong>Published:</strong> ${data.metadata.publish_date}</p>
+                        <p><strong>Views:</strong> ${data.metadata.view_count}</p>
+                    </div>
+                </div>
+                <div class="video-description">
+                    <p>${data.metadata.description}</p>
+                </div>
+            `;
+        }
+
+        function displayTranscript(segments) {
+            const transcriptDisplay = document.getElementById('transcript-display');
+            transcriptDisplay.innerHTML = '';
+            
+            segments.forEach(segment => {
+                const entry = document.createElement('div');
+                entry.className = 'transcript-entry';
+                entry.innerHTML = `
+                    <span class="timestamp">${segment.timestamp}</span>
+                    <div class="transcript-text">${segment.text}</div>
+                `;
+                transcriptDisplay.appendChild(entry);
             });
         }
     </script>
