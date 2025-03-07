@@ -498,7 +498,7 @@
         }
         
         async function analyzeTranscript(analysisType) {
-            const videoTitle = document.querySelector('.video-info h3').textContent;
+            const videoTitle = document.querySelector('.video-info h2').textContent;
             if (!videoTitle) {
                 showError('Please get a transcript first');
                 return;
