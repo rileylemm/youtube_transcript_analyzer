@@ -873,4 +873,4 @@ def delete_video():
 
 if __name__ == '__main__':
     logger.info("Starting Flask application")
-    app.run(debug=True) 
+    app.run(debug=True, port=5002) 
