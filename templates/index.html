@@ -106,6 +106,23 @@
             min-width: 200px;
             margin: 5px;
             background-color: #28a745;
+            position: relative;
+        }
+
+        .tool-buttons button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .tool-buttons button .spinner-border {
+            width: 1rem;
+            height: 1rem;
+            margin-right: 8px;
+            display: none;
+        }
+
+        .tool-buttons button.loading .spinner-border {
+            display: inline-block;
         }
 
         .tool-buttons button:hover {
@@ -429,10 +446,22 @@
             </div>
             
             <div class="tool-buttons">
-                <button onclick="analyzeTranscript('technical_summary')">Technical Summary</button>
-                <button onclick="analyzeTranscript('code_snippets')">Extract Code & Commands</button>
-                <button onclick="analyzeTranscript('tools_and_resources')">List Tools & Resources</button>
-                <button onclick="analyzeTranscript('key_workflows')">Extract Workflows</button>
+                <button onclick="analyzeTranscript('technical_summary')">
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    Technical Summary
+                </button>
+                <button onclick="analyzeTranscript('code_snippets')">
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    Extract Code & Commands
+                </button>
+                <button onclick="analyzeTranscript('tools_and_resources')">
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    List Tools & Resources
+                </button>
+                <button onclick="analyzeTranscript('key_workflows')">
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    Extract Workflows
+                </button>
             </div>
         </div>
 
@@ -498,11 +527,18 @@
         }
         
         async function analyzeTranscript(analysisType) {
+            const button = event.currentTarget;
+            const allButtons = document.querySelectorAll('.tool-buttons button');
+            
             const videoTitle = document.querySelector('.video-info h2').textContent;
             if (!videoTitle) {
                 showError('Please get a transcript first');
                 return;
             }
+            
+            // Disable all buttons and show loading state on clicked button
+            allButtons.forEach(btn => btn.disabled = true);
+            button.classList.add('loading');
             
             const model = document.querySelector('input[name="model"]:checked').value;
             
@@ -525,10 +561,13 @@
                 }
 
                 displayAnalysisResult(data.analysis, model);
-                
                 showStatus(`Analysis completed successfully`, 'success');
             } catch (error) {
                 showError('Error during analysis: ' + error.message);
+            } finally {
+                // Re-enable all buttons and remove loading state
+                allButtons.forEach(btn => btn.disabled = false);
+                button.classList.remove('loading');
             }
         }
         
