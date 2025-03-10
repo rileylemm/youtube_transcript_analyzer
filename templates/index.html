@@ -450,6 +450,10 @@
                     <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
                     Technical Summary
                 </button>
+                <button onclick="analyzeTranscript('full_context')">
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    Full Context Analysis
+                </button>
                 <button onclick="analyzeTranscript('code_snippets')">
                     <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
                     Extract Code & Commands
@@ -481,6 +485,29 @@
 
     <script>
         let currentVideoTitle = null;
+        
+        // Add function to update button states based on model selection
+        function updateButtonStates() {
+            const model = document.querySelector('input[name="model"]:checked').value;
+            const fullContextButton = document.querySelector('button[onclick="analyzeTranscript(\'full_context\')"]');
+            
+            if (model === 'mistral') {
+                fullContextButton.disabled = true;
+                fullContextButton.title = 'Full Context analysis is only available with GPT';
+            } else {
+                fullContextButton.disabled = false;
+                fullContextButton.title = '';
+            }
+        }
+        
+        // Add event listeners for model selection
+        document.addEventListener('DOMContentLoaded', function() {
+            const modelInputs = document.querySelectorAll('input[name="model"]');
+            modelInputs.forEach(input => {
+                input.addEventListener('change', updateButtonStates);
+            });
+            updateButtonStates(); // Initial state
+        });
         
         async function getTranscript() {
             const videoUrl = document.getElementById('video-url').value;

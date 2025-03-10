@@ -133,16 +133,48 @@ class TranscriptAnalyzer:
             full_text += timestamp + segment['text'] + "\n\n"
 
         system_messages = {
-            "technical_summary": (
-                "You are an expert in AI and LLM technology analysis. Your task is to create a focused summary of the video's technical content about LLMs and AI, specifically addressing:\n"
-                "1. Core LLM/AI concepts and techniques discussed\n"
-                "2. Specific implementation details and best practices\n"
-                "3. Unique insights about LLM usage and capabilities\n"
-                "4. Practical applications and limitations mentioned\n"
-                "5. Technical challenges and solutions presented\n\n"
-                "Format the output with clear headings and concise bullet points.\n"
-                "Focus only on the most valuable technical insights about LLM technology."
-            ),
+            "technical_summary": """You are a technical documentation expert tasked with analyzing video transcripts and creating comprehensive, well-structured summaries. Follow these requirements exactly:
+
+1. FORMAT:
+- Start with a high-level overview (2-3 sentences)
+- Break content into clear sections with descriptive headings
+- Use bullet points for key concepts and features
+- Include code blocks and technical examples exactly as presented
+- Maintain consistent formatting throughout
+
+2. CONTENT REQUIREMENTS:
+- Preserve all technical accuracy and depth from the original
+- Include all specific examples, numbers, and code snippets
+- Use consistent technical terminology throughout
+- Explicitly connect related concepts and ideas
+- Remove only advertising and filler content
+
+3. EXAMPLE OUTPUT:
+# Overview
+[2-3 sentence technical overview]
+
+## Core Concepts
+- [Technical concept 1]
+  - [Specific details]
+  - [Example or code if provided]
+- [Technical concept 2]
+  ...
+
+## Implementation Details
+[Technical details section with code examples]
+
+## Key Examples
+[Specific examples from the content]
+
+4. VALIDATION:
+- Verify all technical information is preserved
+- Check terminology consistency
+- Confirm all key examples are included
+- Ensure logical flow between sections
+
+Now analyze the following transcript, maintaining all technical depth while following the format above:
+
+{transcript}""",
             "code_snippets": (
                 "Extract and analyze code related to LLM implementation and usage. For each code snippet:\n"
                 "1. Identify the specific LLM-related functionality (e.g., prompt engineering, API calls, etc.)\n"
@@ -169,7 +201,30 @@ class TranscriptAnalyzer:
                 "4. Performance optimization techniques\n"
                 "5. Error handling and edge cases\n\n"
                 "Emphasize practical, actionable workflows for LLM development."
-            )
+            ),
+            "full_context": """You're having a conversation with someone who missed this video and wants to know everything important from it. Tell them about it as if you watched it yourself, keeping all the valuable content while making it engaging and easy to follow.
+
+Keep everything that matters:
+• Technical details and explanations
+• Examples and demonstrations
+• Personal insights and experiences
+• Practical tips and advice
+• The natural flow of ideas
+
+Skip the non-essential parts:
+• Promotional messages
+• Like/subscribe reminders
+• Repeated information
+• Technical issues
+• Off-topic tangents
+
+Start by telling them what the video is about, then share the content in a natural way, as if you're having a conversation. Include timestamps for important points so they can find specific parts if needed.
+
+Remember: Don't summarize - help them experience the full value of the video in written form.
+
+Here's the transcript - tell me about this video:
+
+{transcript}""",
         }
         
         system_msg = system_messages.get(analysis_type, system_messages["technical_summary"])
@@ -250,7 +305,30 @@ class TranscriptAnalyzer:
                 "4. Performance optimization techniques\n"
                 "5. Error handling and edge cases\n\n"
                 "Emphasize practical, actionable workflows for LLM development."
-            )
+            ),
+            "full_context": """You're having a conversation with someone who missed this video and wants to know everything important from it. Tell them about it as if you watched it yourself, keeping all the valuable content while making it engaging and easy to follow.
+
+Keep everything that matters:
+• Technical details and explanations
+• Examples and demonstrations
+• Personal insights and experiences
+• Practical tips and advice
+• The natural flow of ideas
+
+Skip the non-essential parts:
+• Promotional messages
+• Like/subscribe reminders
+• Repeated information
+• Technical issues
+• Off-topic tangents
+
+Start by telling them what the video is about, then share the content in a natural way, as if you're having a conversation. Include timestamps for important points so they can find specific parts if needed.
+
+Remember: Don't summarize - help them experience the full value of the video in written form.
+
+Here's the transcript - tell me about this video:
+
+{transcript}""",
         }
         
         system_msg = system_messages.get(analysis_type, system_messages["technical_summary"])
@@ -286,6 +364,15 @@ class TranscriptAnalyzer:
             model: Model to use ('mistral' or 'gpt')
         """
         try:
+            # Prevent Mistral from being used for full context analysis
+            if model == "mistral" and analysis_type == "full_context":
+                return AnalysisResult(
+                    success=False,
+                    content="",
+                    model_used=model,
+                    error="Full Context analysis is only available with GPT"
+                )
+            
             # Save the original transcript first
             await self.save_original_transcript(transcript, video_title)
             

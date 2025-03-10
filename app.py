@@ -233,6 +233,7 @@ def library():
                 'original_transcript': None,
                 'analyses': {
                     'technical_summary': {'mistral': [], 'gpt': []},
+                    'full_context': {'mistral': [], 'gpt': []},
                     'code_snippets': {'mistral': [], 'gpt': []},
                     'tools_and_resources': {'mistral': [], 'gpt': []},
                     'key_workflows': {'mistral': [], 'gpt': []}
@@ -751,6 +752,7 @@ async def video_page(video_title):
         # Get analyses
         analyses = {
             'technical_summary': {'mistral': [], 'gpt': []},
+            'full_context': {'mistral': [], 'gpt': []},
             'code_snippets': {'mistral': [], 'gpt': []},
             'tools_and_resources': {'mistral': [], 'gpt': []},
             'key_workflows': {'mistral': [], 'gpt': []}
@@ -869,6 +871,49 @@ def delete_video():
             
     except Exception as e:
         logger.error(f"Error in delete_video: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
+@app.route('/delete_analysis', methods=['POST'])
+def delete_analysis():
+    try:
+        data = request.get_json()
+        video_title = data.get('video_title')
+        analysis_type = data.get('analysis_type')
+        model = data.get('model')
+        timestamp = data.get('timestamp')
+        
+        if not all([video_title, analysis_type, model, timestamp]):
+            return jsonify({'error': 'Missing required parameters'}), 400
+            
+        # Get sanitized video directory
+        safe_title = sanitize_filename(video_title)
+        video_dir = os.path.join(app.config['UPLOAD_FOLDER'], safe_title)
+        
+        if not os.path.exists(video_dir):
+            return jsonify({'error': 'Video not found'}), 404
+            
+        # Find the analysis file with matching timestamp
+        target_file = None
+        for filename in os.listdir(video_dir):
+            if (f'__analysis__{analysis_type}__{model}__' in filename and 
+                filename.endswith('.json')):
+                filepath = os.path.join(video_dir, filename)
+                if abs(os.path.getmtime(filepath) - float(timestamp)) < 1:  # Within 1 second
+                    target_file = filepath
+                    break
+        
+        if not target_file:
+            return jsonify({'error': 'Analysis file not found'}), 404
+            
+        try:
+            os.remove(target_file)
+            return jsonify({'success': True})
+        except Exception as e:
+            logger.error(f"Error deleting analysis file: {str(e)}")
+            return jsonify({'error': f'Failed to delete analysis: {str(e)}'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error in delete_analysis: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 if __name__ == '__main__':
