@@ -40,4 +40,7 @@ Thumbs.db
 
 # Project Specific
 data/
-*.log 
+*.log
+chroma_db/
+*.sqlite3
+checkpoints/ 

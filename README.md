@@ -63,6 +63,12 @@ pip install -r requirements.txt
 - Follow instructions at [Ollama.ai](https://ollama.ai)
 - Pull the Mistral model: `ollama pull mistral`
 
+5. Initialize the vector database:
+```bash
+python vector_db/migrate_to_vector_store.py
+```
+This will create the ChromaDB database in the `chroma_db` directory. Note: This directory is gitignored as it can grow large.
+
 ## Usage
 
 1. Start the Flask server:
@@ -123,6 +129,9 @@ youtube_transcripts/
 - Chat History: Persistent storage with message metadata
 - Video Metadata: Includes thumbnails, channel info, and statistics
 - Vector Database: ChromaDB for efficient semantic search of transcript segments
+  - Located in `chroma_db/` directory (not version controlled)
+  - Initialize using the migration script (see Setup section)
+  - Automatic backups can be configured (see Backup section)
 - All data is organized by video title for easy access
 
 ## Contributing
