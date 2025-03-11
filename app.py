@@ -3,7 +3,8 @@ from scripts.youtube_transcript import (
     get_transcript, get_video_title, save_video_metadata
 )
 from scripts.transcript_analyzer import TranscriptAnalyzer
-from scripts.vector_store import VectorStore
+# from scripts.vector_store import VectorStore  # Old import
+from vector_db.vector_store import VectorStore  # New import from dedicated directory
 from dotenv import load_dotenv
 import os
 import asyncio
@@ -34,6 +35,11 @@ analyzer = TranscriptAnalyzer(openai_api_key=openai_api_key)
 
 # Initialize vector store
 vector_store = VectorStore(persist_directory=app.config['CHROMA_DIR'])
+
+# Configure Flask to always bind to 0.0.0.0:5002
+app.config['SERVER_NAME'] = '0.0.0.0:5002'
+app.config['APPLICATION_ROOT'] = '/'
+app.config['PREFERRED_URL_SCHEME'] = 'http'
 
 def sanitize_filename(name):
     """Convert a string to a safe filename."""
@@ -920,7 +926,9 @@ def delete_video():
 @app.route('/delete_analysis', methods=['POST'])
 def delete_analysis():
     try:
+        logger.debug("Received /delete_analysis request")
         data = request.get_json()
+        
         video_title = data.get('video_title')
         analysis_type = data.get('analysis_type')
         model = data.get('model')
@@ -947,6 +955,7 @@ def delete_analysis():
                     break
         
         if not target_file:
+            logger.error(f"Analysis file not found: {target_file}")
             return jsonify({'error': 'Analysis file not found'}), 404
             
         try:
@@ -960,6 +969,111 @@ def delete_analysis():
         logger.error(f"Error in delete_analysis: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
+@app.route('/admin/backup', methods=['POST'])
+def trigger_backup():
+    try:
+        import subprocess
+        import os
+        
+        data = request.get_json() or {}
+        api_export = data.get('api_export', False)
+        max_backups = data.get('max_backups', 5)
+        
+        # Use external drive as default backup location
+        backup_dir = data.get('backup_dir', '/Volumes/RileyNumber1/youtube_transcription/chroma_db_backup')
+        
+        # Ensure backup directory exists
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        # Construct command with updated script path
+        cmd = [
+            'python', os.path.join(os.path.dirname(__file__), 'backup', 'backup_vector_store.py'),
+            '--source', os.path.join(os.path.dirname(__file__), 'chroma_db'),
+            '--backup-dir', backup_dir,
+            '--max-backups', str(max_backups)
+        ]
+        
+        if api_export:
+            cmd.append('--api-export')
+        
+        logger.info(f"Running backup command: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            logger.info("Backup completed successfully")
+            return jsonify({'success': True, 'message': 'Backup completed successfully'})
+        else:
+            logger.error(f"Backup failed: {result.stderr}")
+            return jsonify({'success': False, 'error': result.stderr}), 500
+            
+    except Exception as e:
+        logger.error(f"Error triggering backup: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/admin/backup/schedule', methods=['GET'])
+def get_backup_schedule():
+    try:
+        import subprocess
+        
+        # Get current crontab
+        result = subprocess.run(['crontab', '-l'], capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            return jsonify({'success': False, 'error': 'Failed to get crontab'}), 500
+            
+        crontab = result.stdout
+        
+        # Look for backup job
+        backup_jobs = []
+        for line in crontab.splitlines():
+            if 'backup_vector_store.py' in line and not line.startswith('#'):
+                # Parse cron schedule
+                parts = line.strip().split()
+                if len(parts) >= 5:
+                    schedule = {
+                        'minute': parts[0],
+                        'hour': parts[1],
+                        'day_of_month': parts[2],
+                        'month': parts[3],
+                        'day_of_week': parts[4],
+                        'command': ' '.join(parts[5:])
+                    }
+                    
+                    # Convert day of week to human-readable format
+                    days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+                    if schedule['day_of_week'] in ['0', 'SUN', 'Sun', 'sunday']:
+                        schedule['readable'] = f"Every Sunday at {schedule['hour']}:{schedule['minute']}"
+                    elif schedule['day_of_week'] == '*' and schedule['day_of_month'] == '*':
+                        schedule['readable'] = f"Every day at {schedule['hour']}:{schedule['minute']}"
+                    else:
+                        try:
+                            day_num = int(schedule['day_of_week'])
+                            if 0 <= day_num <= 6:
+                                schedule['readable'] = f"Every {days[day_num]} at {schedule['hour']}:{schedule['minute']}"
+                            else:
+                                schedule['readable'] = f"At {schedule['hour']}:{schedule['minute']} on day-of-week {schedule['day_of_week']}"
+                        except ValueError:
+                            schedule['readable'] = f"At {schedule['hour']}:{schedule['minute']} on {schedule['day_of_week']}"
+                    
+                    backup_jobs.append(schedule)
+        
+        if backup_jobs:
+            return jsonify({
+                'success': True, 
+                'backup_jobs': backup_jobs,
+                'next_backup': backup_jobs[0]['readable']
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'backup_jobs': [],
+                'message': 'No scheduled backups found'
+            })
+            
+    except Exception as e:
+        logger.error(f"Error getting backup schedule: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 if __name__ == '__main__':
     logger.info("Starting Flask application")
-    app.run(debug=True, port=5002) 
+    app.run(host='0.0.0.0', port=5002, debug=True) 
