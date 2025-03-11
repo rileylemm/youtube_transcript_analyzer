@@ -44,6 +44,14 @@ def test_vector_store():
         persist_directory = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'chroma_db')
         vector_store = VectorStore(persist_directory=persist_directory)
         
+        # Test for Claude and MCP content
+        run_search_test(
+            vector_store,
+            "What is discussed about Claude and MCP setup in the tutorial?",
+            "Specific content search - Claude and MCP setup",
+            n_results=5
+        )
+        
         # Test 1: General semantic search
         run_search_test(
             vector_store,

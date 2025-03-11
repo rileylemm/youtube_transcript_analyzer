@@ -2,8 +2,11 @@ import os
 import json
 import logging
 import hashlib
+import shutil
 from typing import Dict, List, Optional, Tuple, Any
-from scripts.vector_store import VectorStore
+from datetime import datetime
+# from scripts.vector_store import VectorStore  # Old import
+from vector_db.vector_store import VectorStore  # New import from same directory
 
 # Configure logging
 logging.basicConfig(

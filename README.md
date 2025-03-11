@@ -78,6 +78,27 @@ python app.py
 
 2. Open your browser and navigate to `http://127.0.0.1:5002`
 
+### Running as a Background Service
+
+You can set up the application to run continuously in the background using Supervisord:
+
+1. Start the service:
+```bash
+./service/start.sh
+```
+
+2. Check the service status:
+```bash
+./service/status.sh
+```
+
+3. Stop the service:
+```bash
+./service/stop.sh
+```
+
+The service will continue running in the background even if you close your terminal, and will automatically restart if it crashes.
+
 3. Paste a YouTube video URL and click "Get Transcript"
 
 4. Use the analysis tools to extract insights:
@@ -106,13 +127,21 @@ python app.py
 youtube_transcripts/
 ├── app.py                 # Main Flask application
 ├── requirements.txt       # Python dependencies
+├── backup/               # Backup-related scripts and utilities
+│   ├── backup_vector_store.py     # Vector store backup script
+│   └── setup_backup_cron.sh       # Cron job setup for scheduled backups
+├── service/              # Service management scripts
+│   ├── start.sh                   # Start the application service
+│   ├── stop.sh                    # Stop the application service
+│   ├── status.sh                  # Check service status
+│   └── supervisord.conf           # Supervisord configuration
+├── vector_db/            # Vector database related code
+│   ├── vector_store.py            # Vector database implementation
+│   ├── migrate_to_vector_store.py # Migration utility
+│   └── test_vector_store.py       # Testing utility
 ├── scripts/
 │   ├── youtube_transcript.py      # Transcript fetching and processing
-│   ├── transcript_analyzer.py     # Analysis logic and chat functionality
-│   ├── vector_store.py            # Vector database for transcript storage and retrieval
-│   ├── migrate_to_vector_store.py # Migration utility for vector database
-│   ├── test_vector_store.py       # Testing utility for vector database
-│   └── migrate_filenames.py       # Data migration utilities
+│   └── transcript_analyzer.py     # Analysis logic and chat functionality
 ├── static/
 │   └── css/              # Stylesheets
 └── templates/
@@ -133,6 +162,36 @@ youtube_transcripts/
   - Initialize using the migration script (see Setup section)
   - Automatic backups can be configured (see Backup section)
 - All data is organized by video title for easy access
+
+## Backup and Restore
+
+The application includes functionality to backup and restore the ChromaDB vector store.
+
+### Manual Backup
+
+To manually trigger a backup:
+
+```bash
+python backup/backup_vector_store.py
+```
+
+To include API export in the backup:
+
+```bash
+python backup/backup_vector_store.py --api-export
+```
+
+### Scheduled Backups
+
+To set up a weekly backup (runs every Sunday at midnight):
+
+```bash
+./backup/setup_backup_cron.sh
+```
+
+This will create a cron job that backs up the vector store to the external drive at `/Volumes/RileyNumber1/youtube_transcription/chroma_db_backup`.
+
+For more details, see [Vector Store Backup Documentation](docs/vector_store_backup.md).
 
 ## Contributing
 

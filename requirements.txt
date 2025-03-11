@@ -19,3 +19,6 @@ pydantic>=2.0.0
 python-dotenv==1.0.1
 aiohttp==3.9.3
 aiofiles==23.2.1
+
+# Optional dependencies
+# chromadb-data-pipes>=0.0.11  # For API export/import backup functionality
