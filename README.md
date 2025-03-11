@@ -70,7 +70,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-2. Open your browser and navigate to `http://localhost:5000`
+2. Open your browser and navigate to `http://127.0.0.1:5002`
 
 3. Paste a YouTube video URL and click "Get Transcript"
 
@@ -101,9 +101,12 @@ youtube_transcripts/
 ├── app.py                 # Main Flask application
 ├── requirements.txt       # Python dependencies
 ├── scripts/
-│   ├── youtube_transcript.py    # Transcript fetching and processing
-│   ├── transcript_analyzer.py   # Analysis logic and chat functionality
-│   └── migrate_filenames.py     # Data migration utilities
+│   ├── youtube_transcript.py      # Transcript fetching and processing
+│   ├── transcript_analyzer.py     # Analysis logic and chat functionality
+│   ├── vector_store.py            # Vector database for transcript storage and retrieval
+│   ├── migrate_to_vector_store.py # Migration utility for vector database
+│   ├── test_vector_store.py       # Testing utility for vector database
+│   └── migrate_filenames.py       # Data migration utilities
 ├── static/
 │   └── css/              # Stylesheets
 └── templates/
@@ -119,6 +122,7 @@ youtube_transcripts/
 - Analyses: Saved with timestamps and model information
 - Chat History: Persistent storage with message metadata
 - Video Metadata: Includes thumbnails, channel info, and statistics
+- Vector Database: ChromaDB for efficient semantic search of transcript segments
 - All data is organized by video title for easy access
 
 ## Contributing

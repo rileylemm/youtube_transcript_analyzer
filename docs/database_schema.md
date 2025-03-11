@@ -9,8 +9,11 @@ This document outlines the schema and structure for the RAG (Retrieval-Augmented
 ### Vector Database
 
 - **Technology**: ChromaDB
-- **Location**: `data/vector_db/`
+- **Location**: `chroma_db/`
 - **Persistence**: Local persistence with backup support
+- **Implementation**: `scripts/vector_store.py`
+- **Migration Utility**: `scripts/migrate_to_vector_store.py`
+- **Testing**: `scripts/test_vector_store.py`
 - **Collections Structure**:
   ```
   vector_db/

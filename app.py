@@ -3,6 +3,7 @@ from scripts.youtube_transcript import (
     get_transcript, get_video_title, save_video_metadata
 )
 from scripts.transcript_analyzer import TranscriptAnalyzer
+from scripts.vector_store import VectorStore
 from dotenv import load_dotenv
 import os
 import asyncio
@@ -25,10 +26,14 @@ load_dotenv()
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'data')
+app.config['CHROMA_DIR'] = os.path.join(os.path.dirname(__file__), 'chroma_db')
 
 # Initialize transcript analyzer with OpenAI API key
 openai_api_key = os.getenv('OPENAI_API_KEY')
 analyzer = TranscriptAnalyzer(openai_api_key=openai_api_key)
+
+# Initialize vector store
+vector_store = VectorStore(persist_directory=app.config['CHROMA_DIR'])
 
 def sanitize_filename(name):
     """Convert a string to a safe filename."""
@@ -341,6 +346,15 @@ async def get_video_transcript():
             # Save metadata and thumbnails
             await save_video_metadata(metadata, video_dir)
             
+            # Add transcript to vector store
+            try:
+                video_id = metadata.get('video_id', safe_title)
+                vector_store.add_transcript(video_id, transcript)
+                logger.info("Added transcript to vector store")
+            except Exception as e:
+                logger.error(f"Error adding transcript to vector store: {str(e)}", exc_info=True)
+                # Continue execution even if vector store update fails
+            
             logger.info("Transcript and metadata saved successfully")
         except Exception as e:
             logger.error(f"Error saving data: {str(e)}", exc_info=True)
@@ -453,6 +467,22 @@ async def analyze_transcript():
                 logger.info("Analyzing with GPT model")
                 result = await analyzer.analyze_with_gpt(transcript, analysis_type)
             logger.info("Analysis completed successfully")
+            
+            # Add analysis to vector store
+            try:
+                # Create a document with metadata for the analysis
+                analysis_doc = {
+                    'text': result['content'],
+                    'start': 0,  # Analysis applies to entire video
+                    'duration': transcript[-1]['start'] + transcript[-1]['duration']  # Total video duration
+                }
+                video_id = f"{safe_title}_{analysis_type}_{model}"
+                vector_store.add_transcript(video_id, [analysis_doc])
+                logger.info("Added analysis to vector store")
+            except Exception as e:
+                logger.error(f"Error adding analysis to vector store: {str(e)}", exc_info=True)
+                # Continue execution even if vector store update fails
+            
         except Exception as e:
             logger.error(f"Error during analysis: {str(e)}", exc_info=True)
             return jsonify({'error': f'Analysis failed: {str(e)}'}), 500
@@ -851,6 +881,20 @@ def delete_video():
             return jsonify({'error': 'Video not found'}), 404
             
         try:
+            # Delete from vector store
+            try:
+                # Delete transcript segments
+                vector_store.delete_video(safe_title)
+                
+                # Delete analyses
+                for analysis_type in ['technical_summary', 'full_context', 'code_snippets', 'tools_and_resources', 'key_workflows']:
+                    for model in ['mistral', 'gpt']:
+                        vector_store.delete_video(f"{safe_title}_{analysis_type}_{model}")
+                logger.info("Deleted video data from vector store")
+            except Exception as e:
+                logger.error(f"Error deleting from vector store: {str(e)}", exc_info=True)
+                # Continue with file deletion even if vector store deletion fails
+            
             # Remove all files in the directory
             for filename in os.listdir(video_dir):
                 file_path = os.path.join(video_dir, filename)
