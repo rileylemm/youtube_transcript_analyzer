@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ post.metadata.title }} - Reddit Post Analyzer</title>
+    <title>{{ post.title }} - Reddit Post Analyzer</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         body {
@@ -313,17 +313,17 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>{{ post.metadata.title }}</h1>
+            <h1>{{ post.title }}</h1>
             <div class="post-meta">
-                Posted by u/{{ post.metadata.author }} in 
-                <a href="https://reddit.com/r/{{ post.metadata.subreddit }}" target="_blank">r/{{ post.metadata.subreddit }}</a>
-                • {{ post.metadata.score }} points • {{ post.metadata.num_comments }} comments
-                • <span class="timestamp">{{ post.metadata.created_utc|timestamp }}</span>
+                Posted by u/{{ post.author }} in 
+                <a href="https://reddit.com/r/{{ post.subreddit }}" target="_blank">r/{{ post.subreddit }}</a>
+                • {{ post.score }} points • {{ post.num_comments }} comments
+                • <span class="timestamp">{{ post.created_utc|timestamp }}</span>
             </div>
             <div class="nav-links">
                 <a href="/reddit/library">← Back to Library</a>
                 <a href="/" class="back-link">Back to Analyzer</a>
-                <a href="https://reddit.com/r/{{ post.metadata.subreddit }}/comments/{{ post.metadata.post_id }}" 
+                <a href="https://reddit.com{{ post.permalink }}" 
                    class="reddit-link" target="_blank">
                     <span class="reddit-icon">🔗</span> View on Reddit
                 </a>
@@ -333,11 +333,11 @@
         <div class="stats-dashboard">
             <div class="stat-card">
                 <h3>Score</h3>
-                <div class="value">{{ post.metadata.score }}</div>
+                <div class="value">{{ post.score }}</div>
             </div>
             <div class="stat-card">
                 <h3>Comments</h3>
-                <div class="value">{{ post.metadata.num_comments }}</div>
+                <div class="value">{{ post.num_comments }}</div>
             </div>
             <div class="stat-card">
                 <h3>Analyses</h3>
@@ -353,7 +353,7 @@
         <div class="tab-content">
             <div id="content" class="tab-pane active">
                 <div class="content-segment">
-                    <div id="post-content"></div>
+                    <div id="post-content" data-content="{{ post.selftext }}"></div>
                 </div>
             </div>
 
@@ -384,8 +384,14 @@
         // Convert markdown to HTML
         document.addEventListener('DOMContentLoaded', function() {
             const postContent = document.getElementById('post-content');
-            const content = `{{ post.text|safe|replace('\n', '\\n')|replace("'", "\\'") }}`;
-            postContent.innerHTML = marked.parse(content);
+            const rawContent = postContent.getAttribute('data-content');
+            console.log('Raw content type:', typeof rawContent);
+            console.log('Raw content length:', rawContent ? rawContent.length : 0);
+            console.log('Raw content:', rawContent);
+            
+            // Use the content directly since it's already a string
+            postContent.innerHTML = marked.parse(rawContent);
+            console.log('Final HTML:', postContent.innerHTML);
         });
 
         // Tab switching
