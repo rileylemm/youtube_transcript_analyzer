@@ -17,6 +17,9 @@ import aiofiles
 import urllib.parse
 from typing import Optional, Dict
 from werkzeug.utils import secure_filename
+import shutil
+from functools import lru_cache
+from diskcache import Cache
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +32,11 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'data')
 app.config['CHROMA_DIR'] = os.path.join(os.path.dirname(__file__), 'chroma_db')
 
+# Create required directories
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(app.config['CHROMA_DIR'], exist_ok=True)
+os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'reddit'), exist_ok=True)
+
 # Initialize analyzers with OpenAI API key
 openai_api_key = os.getenv('OPENAI_API_KEY')
 analyzer = TranscriptAnalyzer(openai_api_key=openai_api_key)
@@ -38,10 +46,142 @@ reddit_extractor = RedditExtractor()
 # Initialize vector store
 vector_store = VectorStore(persist_directory=app.config['CHROMA_DIR'])
 
-# Configure Flask to always bind to 0.0.0.0:5002
-app.config['SERVER_NAME'] = '0.0.0.0:5002'
-app.config['APPLICATION_ROOT'] = '/'
-app.config['PREFERRED_URL_SCHEME'] = 'http'
+# Initialize cache
+cache = Cache('./cache')
+POSTS_PER_PAGE = 20  # Number of posts to show per page
+
+# Create a function to maintain the post index
+def update_post_index():
+    """Update the post index file with metadata from all posts."""
+    reddit_base_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'reddit')
+    if not os.path.exists(reddit_base_dir):
+        return {}
+    
+    post_index = {}
+    for dirname in os.listdir(reddit_base_dir):
+        post_dir = os.path.join(reddit_base_dir, dirname)
+        if not os.path.isdir(post_dir):
+            continue
+            
+        post_id = dirname.split('__')[-1]
+        post_files = [f for f in os.listdir(post_dir) if f.endswith('.json') and '__post__' in f]
+        
+        if post_files:
+            latest_post_file = max(post_files, key=lambda f: os.path.getmtime(os.path.join(post_dir, f)))
+            post_filepath = os.path.join(post_dir, latest_post_file)
+            
+            try:
+                with open(post_filepath, 'r', encoding='utf-8') as f:
+                    post_data = json.load(f)
+                    post_index[post_id] = {
+                        'dir_name': dirname,
+                        'metadata': {
+                            'title': post_data['title'],
+                            'author': post_data['author'],
+                            'subreddit': post_data['subreddit'],
+                            'created_utc': post_data['created_utc'],
+                            'score': post_data['score'],
+                            'num_comments': post_data['num_comments'],
+                            'post_id': post_id
+                        },
+                        'latest_post_file': latest_post_file
+                    }
+            except Exception as e:
+                logger.error(f"Error processing post file {latest_post_file}: {str(e)}")
+                continue
+    
+    # Save the index
+    index_path = os.path.join(reddit_base_dir, 'post_index.json')
+    with open(index_path, 'w', encoding='utf-8') as f:
+        json.dump(post_index, f, ensure_ascii=False, indent=2)
+    
+    return post_index
+
+@lru_cache(maxsize=100)
+def get_post_data(post_id):
+    """Get post data with caching."""
+    reddit_base_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'reddit')
+    index_path = os.path.join(reddit_base_dir, 'post_index.json')
+    
+    try:
+        # Load the index
+        with open(index_path, 'r', encoding='utf-8') as f:
+            post_index = json.load(f)
+            
+        if post_id not in post_index:
+            return None
+            
+        post_info = post_index[post_id]
+        post_dir = os.path.join(reddit_base_dir, post_info['dir_name'])
+        post_filepath = os.path.join(post_dir, post_info['latest_post_file'])
+        
+        with open(post_filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+            
+    except Exception as e:
+        logger.error(f"Error getting post data: {str(e)}")
+        return None
+
+@lru_cache(maxsize=100)
+def get_post_analyses(post_id):
+    """Get post analyses with caching."""
+    reddit_base_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'reddit')
+    index_path = os.path.join(reddit_base_dir, 'post_index.json')
+    
+    try:
+        # Load the index
+        with open(index_path, 'r', encoding='utf-8') as f:
+            post_index = json.load(f)
+            
+        if post_id not in post_index:
+            return None
+            
+        post_info = post_index[post_id]
+        post_dir = os.path.join(reddit_base_dir, post_info['dir_name'])
+        
+        analyses = {
+            'sentiment': {'mistral': [], 'gpt': []},
+            'technical_summary': {'mistral': [], 'gpt': []},
+            'key_insights': {'mistral': [], 'gpt': []},
+            'action_items': {'mistral': [], 'gpt': []},
+            'questions': {'mistral': [], 'gpt': []}
+        }
+        
+        for filename in os.listdir(post_dir):
+            if '__analysis__' in filename and filename.endswith('.json'):
+                try:
+                    filepath = os.path.join(post_dir, filename)
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        analysis_data = json.load(f)
+                        
+                    metadata = analysis_data.get('metadata', {})
+                    analysis_type = metadata.get('analysis_type')
+                    model = metadata.get('model', 'mistral')
+                    
+                    if analysis_type in analyses and model in analyses[analysis_type]:
+                        analyses[analysis_type][model].append({
+                            'content': str(analysis_data.get('content', '')),
+                            'metadata': metadata,
+                            'timestamp': os.path.getmtime(filepath)
+                        })
+                        
+                except Exception as e:
+                    logger.error(f"Error reading analysis file {filename}: {str(e)}")
+                    continue
+                    
+        # Sort analyses by timestamp
+        for analysis_type in analyses:
+            for model in analyses[analysis_type]:
+                analyses[analysis_type][model].sort(
+                    key=lambda x: x.get('timestamp', ''),
+                    reverse=True
+                )
+                
+        return analyses
+        
+    except Exception as e:
+        logger.error(f"Error getting post analyses: {str(e)}")
+        return None
 
 def sanitize_filename(name):
     """Convert a string to a safe filename."""
@@ -669,7 +809,7 @@ async def chat_with_video():
     except Exception as e:
         logger.error(f"Error in chat_with_video: {str(e)}", exc_info=True)
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
-
+            
 @app.route('/get_chat_history', methods=['POST'])
 async def get_chat_history():
     try:
@@ -702,7 +842,7 @@ async def get_chat_history():
     except Exception as e:
         logger.error(f"Error getting chat history: {str(e)}", exc_info=True)
         return jsonify({'error': f'Failed to load chat history: {str(e)}'}), 500
-
+            
 @app.route('/delete_chat_message', methods=['POST'])
 async def delete_chat_message():
     try:
@@ -971,7 +1111,7 @@ def delete_analysis():
             return jsonify({'error': f'Failed to delete analysis: {str(e)}'}), 500
             
     except Exception as e:
-        logger.error(f"Error in delete_analysis: {str(e)}")
+        logger.error(f"Error in delete_analysis: {str(e)}", exc_info=True)
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @app.route('/admin/backup', methods=['POST'])
@@ -1105,6 +1245,30 @@ def fetch_reddit_post():
         if not post_data:
             logger.error("No post data returned from extractor")
             return jsonify({'error': 'Failed to extract post data'}), 400
+
+        # Create reddit directory if it doesn't exist
+        reddit_base_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'reddit')
+        os.makedirs(reddit_base_dir, exist_ok=True)
+
+        # Sanitize post title for directory name
+        safe_title = sanitize_filename(post_data['title'])
+        # Append post ID to ensure uniqueness
+        dir_name = f"{safe_title}__{post_data['id']}"
+        post_dir = os.path.join(reddit_base_dir, dir_name)
+        os.makedirs(post_dir, exist_ok=True)
+
+        # Save post data to file with descriptive name
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        post_filename = f"{timestamp}__post__{safe_title}__{post_data['id']}.json"
+        post_filepath = os.path.join(post_dir, post_filename)
+
+        try:
+            with open(post_filepath, 'w', encoding='utf-8') as f:
+                json.dump(post_data, f, ensure_ascii=False, indent=2)
+            logger.info(f"Saved post data to {post_filepath}")
+        except Exception as e:
+            logger.error(f"Error saving post data to file: {str(e)}", exc_info=True)
+            # Continue since we can still store in vector DB
             
         # Store in vector database
         try:
@@ -1161,14 +1325,52 @@ async def analyze_reddit_post():
         if not result:
             return jsonify({'error': 'Analysis failed'}), 500
             
-        # Store analysis result
         if result.success:
-            vector_store.add_reddit_analysis(
-                post_id=post_data['id'],
-                analysis_type=analysis_type,
-                model=model,
-                content={'text': result.content, 'metadata': {}}
-            )
+            # Find the post directory
+            reddit_base_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'reddit')
+            safe_title = sanitize_filename(post_data['title'])
+            dir_name = f"{safe_title}__{post_data['id']}"
+            post_dir = os.path.join(reddit_base_dir, dir_name)
+            
+            if not os.path.exists(post_dir):
+                return jsonify({'error': 'Post directory not found'}), 404
+            
+            # Save analysis to file
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            analysis_filename = f"{timestamp}__analysis__{analysis_type}__{model}__{safe_title}__{post_data['id']}.json"
+            analysis_filepath = os.path.join(post_dir, analysis_filename)
+            
+            analysis_data = {
+                'content': result.content,
+                'metadata': {
+                    'post_id': post_data['id'],
+                    'analysis_type': analysis_type,
+                    'model': model,
+                    'timestamp': datetime.now().isoformat()
+                }
+            }
+            
+            try:
+                with open(analysis_filepath, 'w', encoding='utf-8') as f:
+                    json.dump(analysis_data, f, ensure_ascii=False, indent=2)
+                logger.info(f"Saved analysis to {analysis_filepath}")
+            except Exception as e:
+                logger.error(f"Error saving analysis to file: {str(e)}", exc_info=True)
+                # Continue since we can still store in vector DB
+            
+            # Store in vector database
+            try:
+                vector_store.add_reddit_analysis(
+                    post_id=post_data['id'],
+                    analysis_type=analysis_type,
+                    model=model,
+                    content=analysis_data
+                )
+                logger.info(f"Added analysis to vector store for post {post_data['id']}")
+            except Exception as e:
+                logger.error(f"Error adding analysis to vector store: {str(e)}", exc_info=True)
+                # Continue since we already saved to filesystem
+            
             return jsonify({'content': result.content})
         else:
             return jsonify({'error': result.error}), 500
@@ -1202,59 +1404,53 @@ async def search_reddit_posts():
             
 @app.route('/reddit/post/<post_id>')
 def reddit_post_page(post_id):
-    """Display a single Reddit post and its analyses."""
+    """Display a single Reddit post and its analyses using cached data."""
     try:
-        # Get post data from vector store
-        posts = vector_store.get_reddit_post(post_id)
-        if not posts:
+        logger.info(f"Starting to process Reddit post page for ID: {post_id}")
+        
+        # Get cached post data
+        post_data = get_post_data(post_id)
+        if not post_data:
+            logger.error(f"Post data not found for ID: {post_id}")
             return render_template('error.html', error='Post not found'), 404
             
-        # Format post data for template
-        post = posts[0] if isinstance(posts, list) else posts
+        # Format post data for template with explicit type conversion and null checks
         formatted_post = {
-            'metadata': {
-                'title': post.get('metadata', {}).get('title'),
-                'author': post.get('metadata', {}).get('author'),
-                'subreddit': post.get('metadata', {}).get('subreddit'),
-                'created_utc': post.get('metadata', {}).get('created_utc'),
-                'score': post.get('metadata', {}).get('score'),
-                'num_comments': post.get('metadata', {}).get('num_comments'),
-                'post_id': post.get('metadata', {}).get('post_id')
-            },
-            'text': post.get('text', '')
+            'id': post_data.get('id', ''),
+            'title': str(post_data.get('title', '')),
+            'author': str(post_data.get('author', '')),
+            'created_utc': int(float(post_data.get('created_utc', 0))),
+            'selftext': str(post_data.get('selftext', '')),
+            'url': str(post_data.get('url', '')),
+            'permalink': str(post_data.get('permalink', '')),
+            'score': int(post_data.get('score', 0)),
+            'upvote_ratio': float(post_data.get('upvote_ratio', 0.0)),
+            'num_comments': int(post_data.get('num_comments', 0))
         }
         
-        # Get all analyses for this post
-        analyses = {
-            'sentiment': {'mistral': [], 'gpt': []},
-            'keywords': {'mistral': [], 'gpt': []},
-            'engagement': {'mistral': [], 'gpt': []},
-            'summary': {'mistral': [], 'gpt': []},
-            'top_comments': {'mistral': [], 'gpt': []},
-            'tools_workflow': {'mistral': [], 'gpt': []},
-            'prompting_patterns': {'mistral': [], 'gpt': []},
-            'code_review': {'mistral': [], 'gpt': []}
-        }
-        
-        # Get analyses from vector store
-        post_analyses = vector_store.get_reddit_post_analyses(post_id)
-        for analysis in post_analyses:
-            analysis_type = analysis.get('metadata', {}).get('analysis_type')
-            model = analysis.get('metadata', {}).get('model')
-            if analysis_type in analyses and model in analyses[analysis_type]:
-                analyses[analysis_type][model].append({
-                    'content': analysis.get('text', ''),
-                    'timestamp': analysis.get('metadata', {}).get('timestamp')
-                })
-        
-        # Sort analyses by timestamp
-        for analysis_type in analyses:
-            for model in analyses[analysis_type]:
-                analyses[analysis_type][model].sort(
-                    key=lambda x: x.get('timestamp', ''),
-                    reverse=True
-                )
-        
+        # Get cached analyses
+        analyses = get_post_analyses(post_id)
+        if not analyses:
+            analyses = {
+                'sentiment': {'mistral': [], 'gpt': []},
+                'technical_summary': {'mistral': [], 'gpt': []},
+                'key_insights': {'mistral': [], 'gpt': []},
+                'action_items': {'mistral': [], 'gpt': []},
+                'questions': {'mistral': [], 'gpt': []}
+            }
+            
+        # Verify data is JSON serializable
+        try:
+            logger.info("Testing JSON serialization of data")
+            json.dumps(formatted_post)
+            logger.info("Post data is JSON serializable")
+            json.dumps(analyses)
+            logger.info("Analyses data is JSON serializable")
+        except TypeError as e:
+            logger.error(f"JSON serialization test failed: {str(e)}", exc_info=True)
+            return render_template('error.html', error=f'Data serialization error: {str(e)}'), 500
+            
+        logger.info(f"Rendering template with post data: {formatted_post['title']}")
         return render_template(
             'reddit_post.html',
             post=formatted_post,
@@ -1267,66 +1463,122 @@ def reddit_post_page(post_id):
 
 @app.route('/reddit/library')
 def reddit_library():
-    """Display the Reddit posts library page."""
+    """Display the Reddit posts library page with pagination."""
     try:
-        # Get all Reddit posts from vector store
-        posts = vector_store.get_all_reddit_posts()
+        # Get page number from query parameters
+        page = request.args.get('page', 1, type=int)
         
-        # Format posts as a dictionary with post IDs as keys
+        # Get the reddit base directory
+        reddit_base_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'reddit')
+        if not os.path.exists(reddit_base_dir):
+            return render_template('reddit_library.html', posts={}, total_pages=0, current_page=1)
+            
+        # Load or update post index
+        index_path = os.path.join(reddit_base_dir, 'post_index.json')
+        if not os.path.exists(index_path):
+            post_index = update_post_index()
+        else:
+            try:
+                with open(index_path, 'r', encoding='utf-8') as f:
+                    post_index = json.load(f)
+            except Exception:
+                post_index = update_post_index()
+                
+        # Sort posts by creation time (newest first)
+        sorted_posts = sorted(
+            post_index.items(),
+            key=lambda x: x[1]['metadata']['created_utc'],
+            reverse=True
+        )
+        
+        # Calculate pagination
+        total_posts = len(sorted_posts)
+        total_pages = (total_posts + POSTS_PER_PAGE - 1) // POSTS_PER_PAGE
+        page = min(max(1, page), total_pages) if total_pages > 0 else 1
+        
+        # Get posts for current page
+        start_idx = (page - 1) * POSTS_PER_PAGE
+        end_idx = start_idx + POSTS_PER_PAGE
+        current_page_posts = sorted_posts[start_idx:end_idx]
+        
+        # Format posts for template
         formatted_posts = {}
-        for post in posts:
-            post_id = post['metadata']['post_id']
+        for post_id, post_info in current_page_posts:
+            # Get cached post data
+            post_data = get_post_data(post_id)
+            if not post_data:
+                continue
+                
+            # Get cached analyses
+            analyses = get_post_analyses(post_id)
+            if not analyses:
+                analyses = {
+                    'sentiment': {'mistral': [], 'gpt': []},
+                    'technical_summary': {'mistral': [], 'gpt': []},
+                    'key_insights': {'mistral': [], 'gpt': []},
+                    'action_items': {'mistral': [], 'gpt': []},
+                    'questions': {'mistral': [], 'gpt': []}
+                }
+            
+            # Flatten analyses for display
+            flattened_analyses = []
+            for analysis_type, models in analyses.items():
+                for model, items in models.items():
+                    for item in items:
+                        flattened_analyses.append({
+                            'metadata': {
+                                'analysis_type': analysis_type,
+                                'model': model
+                            },
+                            'content': item.get('content', ''),
+                            'timestamp': item.get('timestamp', '')
+                        })
+                
             formatted_posts[post_id] = {
-                'metadata': post['metadata'],
-                'text': post['text']
+                'metadata': post_info['metadata'],
+                'text': str(post_data.get('selftext', '')),
+                'analyses': flattened_analyses
             }
-            # Get analyses for this post
-            analyses = vector_store.get_reddit_post_analyses(post_id)
-            formatted_posts[post_id]['analyses'] = analyses
-        
+            
         return render_template(
             'reddit_library.html',
-            posts=formatted_posts
+            posts=formatted_posts,
+            total_pages=total_pages,
+            current_page=page
         )
         
     except Exception as e:
         logger.error(f"Error loading Reddit library: {str(e)}", exc_info=True)
-        return render_template('reddit_library.html', posts={}, error=str(e))
+        return render_template('reddit_library.html', posts={}, error=str(e), total_pages=0, current_page=1)
 
-@app.route('/reddit/delete_post', methods=['POST'])
+@app.route('/delete_reddit_post', methods=['POST'])
 def delete_reddit_post():
     """Delete a Reddit post and all its analyses."""
     try:
-        data = request.get_json()
-        post_id = data.get('post_id')
-        
+        post_id = request.json.get('post_id')
         if not post_id:
             return jsonify({'error': 'No post ID provided'}), 400
-            
-        try:
-            # Delete from vector store
-            vector_store.delete_reddit_post(post_id)
-            
-            # Delete post directory
-            post_dir = os.path.join(app.config['UPLOAD_FOLDER'], f"reddit_{post_id}")
-            if os.path.exists(post_dir):
-                for filename in os.listdir(post_dir):
-                    filepath = os.path.join(post_dir, filename)
-                    try:
-                        os.remove(filepath)
-                    except Exception as e:
-                        logger.error(f"Error deleting file {filepath}: {str(e)}")
-                os.rmdir(post_dir)
-            
-            return jsonify({'success': True})
-            
-        except Exception as e:
-            logger.error(f"Error deleting Reddit post: {str(e)}", exc_info=True)
-            return jsonify({'error': f'Failed to delete post: {str(e)}'}), 500
-            
+
+        # Find the post directory
+        reddit_base_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'reddit')
+        post_dir = None
+        for dirname in os.listdir(reddit_base_dir):
+            if dirname.endswith(f"__{post_id}"):
+                post_dir = os.path.join(reddit_base_dir, dirname)
+                break
+
+        if not post_dir or not os.path.exists(post_dir):
+            return jsonify({'error': 'Post not found'}), 404
+
+        # Delete the entire post directory
+        shutil.rmtree(post_dir)
+        logger.info(f"Successfully deleted Reddit post directory: {post_dir}")
+        
+        return jsonify({'success': True})
+
     except Exception as e:
-        logger.error(f"Error in delete_reddit_post: {str(e)}", exc_info=True)
-        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+        logger.error(f"Error deleting Reddit post: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/reddit/delete_analysis', methods=['POST'])
 def delete_reddit_analysis():

@@ -163,10 +163,11 @@
         .menu-item {
             padding: 8px 16px;
             cursor: pointer;
-            transition: background-color 0.2s;
+            color: #333;
             display: flex;
             align-items: center;
             gap: 8px;
+            transition: background-color 0.2s;
         }
 
         .menu-item:hover {
@@ -186,49 +187,60 @@
             height: 100%;
             background: rgba(0, 0, 0, 0.5);
             z-index: 1000;
-        }
-
-        .modal.show {
-            display: flex;
             align-items: center;
             justify-content: center;
         }
 
+        .modal.show {
+            display: flex;
+        }
+
         .modal-content {
             background: white;
-            padding: 20px;
-            border-radius: 8px;
+            padding: 24px;
+            border-radius: 12px;
             max-width: 400px;
             width: 90%;
         }
 
         .modal-title {
-            margin-top: 0;
+            margin: 0 0 16px 0;
+            font-size: 1.2em;
             color: #333;
         }
 
         .modal-buttons {
             display: flex;
+            gap: 12px;
             justify-content: flex-end;
-            gap: 10px;
-            margin-top: 20px;
+            margin-top: 24px;
         }
 
         .modal-button {
             padding: 8px 16px;
+            border-radius: 6px;
             border: none;
-            border-radius: 4px;
             cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
         }
 
         .modal-button.cancel {
-            background: #e9ecef;
+            background: #f5f5f5;
             color: #333;
+        }
+
+        .modal-button.cancel:hover {
+            background: #e5e5e5;
         }
 
         .modal-button.delete {
             background: #dc3545;
             color: white;
+        }
+
+        .modal-button.delete:hover {
+            background: #c82333;
         }
 
         .analysis-badges {
@@ -254,6 +266,33 @@
             background-color: #f0fff4;
             color: #38a169;
         }
+
+        .pagination-controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px 0;
+            gap: 15px;
+        }
+
+        .pagination-button {
+            padding: 8px 16px;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            border: 1px solid #333;
+            border-radius: 4px;
+            text-decoration: none;
+            transition: background-color 0.3s;
+        }
+
+        .pagination-button:hover {
+            background-color: #333;
+        }
+
+        .pagination-info {
+            color: #666;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -277,26 +316,34 @@
     </div>
     {% else %}
     <div class="post-grid">
-        {% for post_id, post in posts.items() %}
-        <div class="post-card">
-            <a href="/reddit/post/{{ post_id }}" class="post-title">{{ post.metadata.title }}</a>
+        {% for post_id, post_data in posts.items() %}
+        <div class="post-card" data-post-id="{{ post_id }}">
+            <button class="menu-button" onclick="toggleMenu(event, '{{ post_id }}')">
+                <span class="menu-dots">⋮</span>
+            </button>
+            <div class="menu-dropdown" id="menu-{{ post_id }}">
+                <div class="menu-item delete" onclick="showDeleteConfirmation('{{ post_id }}')">
+                    <span>🗑️</span> Delete
+                </div>
+            </div>
+            <a href="/reddit/post/{{ post_id }}" class="post-title">{{ post_data.metadata.title }}</a>
             <div class="post-metadata">
-                <p>Posted by u/{{ post.metadata.author }} in 
-                    <a href="https://reddit.com/r/{{ post.metadata.subreddit }}" class="subreddit-link" target="_blank">
-                        r/{{ post.metadata.subreddit }}
+                <p>Posted by u/{{ post_data.metadata.author }} in 
+                    <a href="https://reddit.com/r/{{ post_data.metadata.subreddit }}" class="subreddit-link" target="_blank">
+                        r/{{ post_data.metadata.subreddit }}
                     </a>
                 </p>
                 <div class="post-stats">
-                    <span>{{ post.metadata.score }} points</span>
-                    <span>{{ post.metadata.num_comments }} comments</span>
-                    <span>{{ post.metadata.created_utc|timestamp }}</span>
+                    <span>{{ post_data.metadata.score }} points</span>
+                    <span>{{ post_data.metadata.num_comments }} comments</span>
+                    <span>{{ post_data.metadata.created_utc|timestamp }}</span>
                 </div>
             </div>
-            {% if post.analyses %}
+            {% if post_data.analyses %}
             <div class="analysis-badges">
-                {% for analysis in post.analyses %}
+                {% for analysis in post_data.analyses %}
                 <span class="analysis-badge {{ analysis.metadata.model }}">
-                    {{ analysis.metadata.analysis_type }}
+                    {{ analysis.metadata.analysis_type|replace('_', ' ')|title }}
                 </span>
                 {% endfor %}
             </div>
@@ -304,13 +351,28 @@
         </div>
         {% endfor %}
     </div>
+    
+    <!-- Pagination Controls -->
+    {% if total_pages > 1 %}
+    <div class="pagination-controls">
+        {% if current_page > 1 %}
+            <a href="{{ url_for('reddit_library', page=current_page-1) }}" class="pagination-button">&laquo; Previous</a>
+        {% endif %}
+        
+        <span class="pagination-info">Page {{ current_page }} of {{ total_pages }}</span>
+        
+        {% if current_page < total_pages %}
+            <a href="{{ url_for('reddit_library', page=current_page+1) }}" class="pagination-button">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
     {% endif %}
 
     <!-- Delete confirmation modal -->
     <div class="modal" id="delete-modal">
         <div class="modal-content">
-            <h3 class="modal-title">Delete Post</h3>
-            <p>Are you sure you want to delete this post and all its analyses? This action cannot be undone.</p>
+            <h3 class="modal-title">Delete Reddit Post</h3>
+            <p>Are you sure you want to delete this Reddit post and all its analyses? This action cannot be undone.</p>
             <div class="modal-buttons">
                 <button class="modal-button cancel" onclick="hideDeleteConfirmation()">Cancel</button>
                 <button class="modal-button delete" onclick="deletePost()">Delete</button>
@@ -366,7 +428,7 @@
             if (!postToDelete) return;
 
             try {
-                const response = await fetch('/reddit/delete_post', {
+                const response = await fetch('/delete_reddit_post', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
