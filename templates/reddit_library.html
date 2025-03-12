@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Video Library</title>
+    <title>Reddit Library</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
@@ -14,19 +14,15 @@
         }
 
         .header {
+            margin-bottom: 30px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 30px;
-            padding: 20px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
         .header h1 {
-            margin: 0;
             color: #333;
+            margin: 0;
         }
 
         .header-links {
@@ -34,50 +30,39 @@
             gap: 20px;
         }
 
-        .header-links a {
-            color: #3498db;
+        .header a {
+            color: #0066cc;
             text-decoration: none;
-            font-weight: 500;
             font-size: 1.1em;
         }
 
-        .header-links a:hover {
+        .header a:hover {
             text-decoration: underline;
         }
 
-        .video-grid {
+        .post-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
             gap: 20px;
             margin-top: 20px;
         }
 
-        .video-card {
+        .post-card {
             background: white;
             border-radius: 10px;
             overflow: hidden;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
             transition: transform 0.2s ease-in-out;
             position: relative;
+            padding: 20px;
         }
 
-        .video-card:hover {
+        .post-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 4px 10px rgba(0,0,0,0.15);
         }
 
-        .video-thumbnail {
-            width: 100%;
-            height: 180px;
-            object-fit: cover;
-            border-bottom: 1px solid #eee;
-        }
-
-        .video-info {
-            padding: 15px;
-        }
-
-        .video-title {
+        .post-title {
             font-size: 1.1em;
             font-weight: 600;
             margin: 0 0 10px 0;
@@ -85,29 +70,29 @@
             text-decoration: none;
         }
 
-        .video-title:hover {
+        .post-title:hover {
             color: #0066cc;
         }
 
-        .video-metadata {
+        .post-metadata {
             font-size: 0.9em;
             color: #666;
         }
 
-        .video-metadata p {
+        .post-metadata p {
             margin: 5px 0;
         }
 
-        .channel-link {
+        .subreddit-link {
             color: #0066cc;
             text-decoration: none;
         }
 
-        .channel-link:hover {
+        .subreddit-link:hover {
             text-decoration: underline;
         }
 
-        .video-stats {
+        .post-stats {
             display: flex;
             gap: 15px;
             margin-top: 10px;
@@ -123,7 +108,7 @@
             margin-top: 20px;
         }
 
-        .no-videos {
+        .no-posts {
             text-align: center;
             padding: 40px;
             background: white;
@@ -131,7 +116,6 @@
             margin-top: 20px;
         }
 
-        /* Menu button styles */
         .menu-button {
             position: absolute;
             top: 10px;
@@ -159,7 +143,6 @@
             line-height: 0;
         }
 
-        /* Menu dropdown styles */
         .menu-dropdown {
             position: absolute;
             top: 45px;
@@ -180,11 +163,10 @@
         .menu-item {
             padding: 8px 16px;
             cursor: pointer;
-            color: #333;
+            transition: background-color 0.2s;
             display: flex;
             align-items: center;
             gap: 8px;
-            transition: background-color 0.2s;
         }
 
         .menu-item:hover {
@@ -195,7 +177,6 @@
             color: #dc3545;
         }
 
-        /* Modal styles */
         .modal {
             display: none;
             position: fixed;
@@ -205,51 +186,44 @@
             height: 100%;
             background: rgba(0, 0, 0, 0.5);
             z-index: 1000;
-            align-items: center;
-            justify-content: center;
         }
 
         .modal.show {
             display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .modal-content {
             background: white;
-            padding: 24px;
-            border-radius: 12px;
+            padding: 20px;
+            border-radius: 8px;
             max-width: 400px;
             width: 90%;
         }
 
         .modal-title {
-            margin: 0 0 16px 0;
-            font-size: 1.2em;
+            margin-top: 0;
             color: #333;
         }
 
         .modal-buttons {
             display: flex;
-            gap: 12px;
             justify-content: flex-end;
-            margin-top: 24px;
+            gap: 10px;
+            margin-top: 20px;
         }
 
         .modal-button {
             padding: 8px 16px;
-            border-radius: 6px;
             border: none;
+            border-radius: 4px;
             cursor: pointer;
-            font-size: 14px;
-            transition: background-color 0.2s;
         }
 
         .modal-button.cancel {
-            background: #f5f5f5;
+            background: #e9ecef;
             color: #333;
-        }
-
-        .modal-button.cancel:hover {
-            background: #e5e5e5;
         }
 
         .modal-button.delete {
@@ -257,17 +231,37 @@
             color: white;
         }
 
-        .modal-button.delete:hover {
-            background: #c82333;
+        .analysis-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .analysis-badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+
+        .analysis-badge.mistral {
+            background-color: #e9f5ff;
+            color: #0066cc;
+        }
+
+        .analysis-badge.gpt {
+            background-color: #f0f9ff;
+            color: #0099ff;
         }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>Video Library</h1>
+        <h1>Reddit Library</h1>
         <div class="header-links">
             <a href="/">← Back to Analyzer</a>
-            <a href="/reddit/library">Reddit Library</a>
+            <a href="/library">Video Library</a>
         </div>
     </div>
 
@@ -277,47 +271,45 @@
     </div>
     {% endif %}
 
-    {% if not videos %}
-    <div class="no-videos">
-        <p>No videos found in the library. Try analyzing some videos first!</p>
+    {% if not posts %}
+    <div class="no-posts">
+        <p>No Reddit posts found in the library. Try analyzing some posts first!</p>
     </div>
     {% else %}
-    <div class="video-grid">
-        {% for video_title, video_data in videos.items() %}
-        <div class="video-card" data-video-title="{{ video_title }}">
-            <button class="menu-button" onclick="toggleMenu(event, '{{ video_title }}')">
+    <div class="post-grid">
+        {% for post_id, post in posts.items() %}
+        <div class="post-card" data-post-id="{{ post_id }}">
+            <button class="menu-button" onclick="toggleMenu(event, '{{ post_id }}')">
                 <span class="menu-dots">⋮</span>
             </button>
-            <div class="menu-dropdown" id="menu-{{ video_title|urlencode }}">
-                <div class="menu-item delete" onclick="showDeleteConfirmation('{{ video_title }}')">
+            <div class="menu-dropdown" id="menu-{{ post_id }}">
+                <div class="menu-item delete" onclick="showDeleteConfirmation('{{ post_id }}')">
                     <span>🗑️</span> Delete
                 </div>
             </div>
-            {% set metadata_file = find_latest_file(video_data.video_dir, '__metadata__') %}
-            {% if metadata_file %}
-                {% set metadata = load_json_file(metadata_file) %}
-                <img class="video-thumbnail" 
-                     src="{{ metadata.thumbnail_url }}" 
-                     alt="{{ metadata.title }}">
-                <div class="video-info">
-                    <a href="/video/{{ video_title }}" class="video-title">{{ metadata.title }}</a>
-                    <div class="video-metadata">
-                        <p>By <a href="{{ metadata.channel_url }}" class="channel-link" target="_blank">{{ metadata.channel_name }}</a></p>
-                        <p>Published: {{ metadata.publish_date|timestamp }}</p>
-                        <div class="video-stats">
-                            <span>{{ "{:,}".format(metadata.view_count) }} views</span>
-                            <span>{{ video_data.analyses|length }} analyses</span>
-                        </div>
+            {% if post.metadata %}
+                <a href="/reddit/post/{{ post_id }}" class="post-title">{{ post.metadata.title }}</a>
+                <div class="post-metadata">
+                    <p>r/{{ post.metadata.subreddit }} • u/{{ post.metadata.author }}</p>
+                    <div class="post-stats">
+                        <span>{{ "{:,}".format(post.metadata.score) }} points</span>
+                        <span>{{ "{:,}".format(post.metadata.num_comments) }} comments</span>
                     </div>
                 </div>
+                <div class="analysis-badges">
+                    {% for analysis_type, models in post.analyses.items() %}
+                        {% for model, analyses in models.items() %}
+                            {% if analyses %}
+                                <span class="analysis-badge {{ model }}">
+                                    {{ analysis_type|replace('_', ' ')|title }} ({{ analyses|length }})
+                                </span>
+                            {% endif %}
+                        {% endfor %}
+                    {% endfor %}
+                </div>
             {% else %}
-                <div class="video-info">
-                    <a href="/video/{{ video_title }}" class="video-title">{{ video_title }}</a>
-                    <div class="video-metadata">
-                        <div class="video-stats">
-                            <span>{{ video_data.analyses|length }} analyses</span>
-                        </div>
-                    </div>
+                <div class="post-metadata">
+                    <p>Post ID: {{ post_id }}</p>
                 </div>
             {% endif %}
         </div>
@@ -328,18 +320,18 @@
     <!-- Delete confirmation modal -->
     <div class="modal" id="delete-modal">
         <div class="modal-content">
-            <h3 class="modal-title">Delete Video</h3>
-            <p>Are you sure you want to delete this video and all its analyses? This action cannot be undone.</p>
+            <h3 class="modal-title">Delete Post</h3>
+            <p>Are you sure you want to delete this post and all its analyses? This action cannot be undone.</p>
             <div class="modal-buttons">
                 <button class="modal-button cancel" onclick="hideDeleteConfirmation()">Cancel</button>
-                <button class="modal-button delete" onclick="deleteVideo()">Delete</button>
+                <button class="modal-button delete" onclick="deletePost()">Delete</button>
             </div>
         </div>
     </div>
 
     <script>
         let activeMenu = null;
-        let videoToDelete = null;
+        let postToDelete = null;
 
         // Close menu when clicking outside
         document.addEventListener('click', (event) => {
@@ -348,9 +340,9 @@
             }
         });
 
-        function toggleMenu(event, videoTitle) {
+        function toggleMenu(event, postId) {
             event.stopPropagation();
-            const menuId = `menu-${encodeURIComponent(videoTitle)}`;
+            const menuId = `menu-${postId}`;
             const menu = document.getElementById(menuId);
             
             if (activeMenu && activeMenu !== menu) {
@@ -368,8 +360,8 @@
             }
         }
 
-        function showDeleteConfirmation(videoTitle) {
-            videoToDelete = videoTitle;
+        function showDeleteConfirmation(postId) {
+            postToDelete = postId;
             const modal = document.getElementById('delete-modal');
             modal.classList.add('show');
             closeAllMenus();
@@ -378,40 +370,40 @@
         function hideDeleteConfirmation() {
             const modal = document.getElementById('delete-modal');
             modal.classList.remove('show');
-            videoToDelete = null;
+            postToDelete = null;
         }
 
-        async function deleteVideo() {
-            if (!videoToDelete) return;
+        async function deletePost() {
+            if (!postToDelete) return;
 
             try {
-                const response = await fetch('/delete_video', {
+                const response = await fetch('/reddit/delete_post', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ video_title: videoToDelete })
+                    body: JSON.stringify({ post_id: postToDelete })
                 });
 
                 if (!response.ok) {
-                    throw new Error('Failed to delete video');
+                    throw new Error('Failed to delete post');
                 }
 
-                // Remove the video card from the UI
-                const videoCard = document.querySelector(`.video-card[data-video-title="${videoToDelete}"]`);
-                if (videoCard) {
-                    videoCard.remove();
+                // Remove the post card from the UI
+                const postCard = document.querySelector(`.post-card[data-post-id="${postToDelete}"]`);
+                if (postCard) {
+                    postCard.remove();
                 }
 
-                // Check if there are no more videos
-                const remainingVideos = document.querySelectorAll('.video-card');
-                if (remainingVideos.length === 0) {
-                    location.reload(); // Reload to show the "No videos" message
+                // Check if there are no more posts
+                const remainingPosts = document.querySelectorAll('.post-card');
+                if (remainingPosts.length === 0) {
+                    location.reload(); // Reload to show the "No posts" message
                 }
 
             } catch (error) {
-                console.error('Error deleting video:', error);
-                alert('Failed to delete video. Please try again.');
+                console.error('Error deleting post:', error);
+                alert('Failed to delete post. Please try again.');
             } finally {
                 hideDeleteConfirmation();
             }

@@ -407,9 +407,49 @@
         .toggle-icon.collapsed {
             transform: rotate(-90deg);
         }
+
+        .nav-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .nav-header h1 {
+            margin: 0;
+            text-align: left;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 20px;
+        }
+
+        .nav-links a {
+            color: #3498db;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 1.1em;
+        }
+
+        .nav-links a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
+    <div class="nav-header">
+        <h1>YouTube Transcript Analyzer</h1>
+        <div class="nav-links">
+            <a href="/library">Video Library</a>
+            <a href="/reddit/library">Reddit Library</a>
+        </div>
+    </div>
+    
     <div class="container">
         <h1>YouTube Transcript Analyzer</h1>
         
