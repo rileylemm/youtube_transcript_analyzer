@@ -33,17 +33,45 @@ class RedditExtractor:
     
     def extract_post(self, url: str) -> Dict[str, Any]:
         """Extract data from a Reddit post."""
-        if not url.endswith('/'):
-            url += '/'
-        
         try:
+            # Validate and clean URL
+            if not url:
+                raise ValueError("URL cannot be empty")
+                
+            # Ensure URL ends with slash for .json append
+            if not url.endswith('/'):
+                url += '/'
+            
             # Get JSON version of the post
             json_url = url + '.json'
-            response = requests.get(json_url, headers=self.headers)
-            response.raise_for_status()
+            logger.info(f"Fetching Reddit post from: {json_url}")
             
-            json_data = response.json()
-            post_data = json_data[0]['data']['children'][0]['data']
+            try:
+                response = requests.get(json_url, headers=self.headers, timeout=10)
+                response.raise_for_status()
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Request failed for {json_url}: {str(e)}")
+                if response.status_code == 403:
+                    raise ValueError("Access forbidden. The post may be private or deleted.")
+                elif response.status_code == 404:
+                    raise ValueError("Post not found. The URL may be invalid.")
+                else:
+                    raise ValueError(f"Failed to fetch post: HTTP {response.status_code}")
+            
+            try:
+                json_data = response.json()
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON response: {str(e)}")
+                raise ValueError("Invalid response from Reddit")
+            
+            if not json_data or not isinstance(json_data, list) or len(json_data) < 1:
+                raise ValueError("Invalid response format from Reddit")
+            
+            try:
+                post_data = json_data[0]['data']['children'][0]['data']
+            except (KeyError, IndexError) as e:
+                logger.error(f"Failed to extract post data from response: {str(e)}")
+                raise ValueError("Could not find post data in response")
             
             # Extract relevant information
             extracted_data = {
@@ -52,24 +80,25 @@ class RedditExtractor:
                 'subreddit': post_data.get('subreddit'),
                 'score': post_data.get('score'),
                 'upvote_ratio': post_data.get('upvote_ratio'),
-                'created_utc': datetime.fromtimestamp(post_data.get('created_utc')).isoformat(),
-                'content': post_data.get('selftext'),
+                'created_utc': post_data.get('created_utc'),
+                'selftext': post_data.get('selftext'),
                 'url': url,
                 'is_self': post_data.get('is_self'),
                 'permalink': f"https://reddit.com{post_data.get('permalink')}",
                 'num_comments': post_data.get('num_comments'),
-                'post_id': self.extract_post_id(url)
+                'id': self.extract_post_id(url)
             }
+            
+            # Validate required fields
+            if not extracted_data['title']:
+                raise ValueError("Post title is missing")
             
             logger.info(f"Successfully extracted Reddit post: {extracted_data['title']}")
             return extracted_data
             
-        except requests.RequestException as e:
-            logger.error(f"Failed to fetch Reddit post: {str(e)}")
-            raise
-        except (KeyError, IndexError) as e:
-            logger.error(f"Failed to parse Reddit data: {str(e)}")
+        except ValueError as e:
+            logger.error(f"Validation error: {str(e)}")
             raise
         except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
-            raise 
+            logger.error(f"Unexpected error extracting post: {str(e)}", exc_info=True)
+            raise ValueError(f"Failed to extract post data: {str(e)}") 

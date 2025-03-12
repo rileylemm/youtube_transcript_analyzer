@@ -251,8 +251,8 @@
         }
 
         .analysis-badge.gpt {
-            background-color: #f0f9ff;
-            color: #0099ff;
+            background-color: #f0fff4;
+            color: #38a169;
         }
     </style>
 </head>
@@ -260,14 +260,14 @@
     <div class="header">
         <h1>Reddit Library</h1>
         <div class="header-links">
-            <a href="/">← Back to Analyzer</a>
-            <a href="/library">Video Library</a>
+            <a href="/" class="back-link">← Back to Analyzer</a>
+            <a href="/library" class="video-library-link">Video Library</a>
         </div>
     </div>
 
     {% if error %}
     <div class="error-message">
-        <p>Error: {{ error }}</p>
+        {{ error }}
     </div>
     {% endif %}
 
@@ -278,39 +278,28 @@
     {% else %}
     <div class="post-grid">
         {% for post_id, post in posts.items() %}
-        <div class="post-card" data-post-id="{{ post_id }}">
-            <button class="menu-button" onclick="toggleMenu(event, '{{ post_id }}')">
-                <span class="menu-dots">⋮</span>
-            </button>
-            <div class="menu-dropdown" id="menu-{{ post_id }}">
-                <div class="menu-item delete" onclick="showDeleteConfirmation('{{ post_id }}')">
-                    <span>🗑️</span> Delete
+        <div class="post-card">
+            <a href="/reddit/post/{{ post_id }}" class="post-title">{{ post.metadata.title }}</a>
+            <div class="post-metadata">
+                <p>Posted by u/{{ post.metadata.author }} in 
+                    <a href="https://reddit.com/r/{{ post.metadata.subreddit }}" class="subreddit-link" target="_blank">
+                        r/{{ post.metadata.subreddit }}
+                    </a>
+                </p>
+                <div class="post-stats">
+                    <span>{{ post.metadata.score }} points</span>
+                    <span>{{ post.metadata.num_comments }} comments</span>
+                    <span>{{ post.metadata.created_utc|timestamp }}</span>
                 </div>
             </div>
-            {% if post.metadata %}
-                <a href="/reddit/post/{{ post_id }}" class="post-title">{{ post.metadata.title }}</a>
-                <div class="post-metadata">
-                    <p>r/{{ post.metadata.subreddit }} • u/{{ post.metadata.author }}</p>
-                    <div class="post-stats">
-                        <span>{{ "{:,}".format(post.metadata.score) }} points</span>
-                        <span>{{ "{:,}".format(post.metadata.num_comments) }} comments</span>
-                    </div>
-                </div>
-                <div class="analysis-badges">
-                    {% for analysis_type, models in post.analyses.items() %}
-                        {% for model, analyses in models.items() %}
-                            {% if analyses %}
-                                <span class="analysis-badge {{ model }}">
-                                    {{ analysis_type|replace('_', ' ')|title }} ({{ analyses|length }})
-                                </span>
-                            {% endif %}
-                        {% endfor %}
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="post-metadata">
-                    <p>Post ID: {{ post_id }}</p>
-                </div>
+            {% if post.analyses %}
+            <div class="analysis-badges">
+                {% for analysis in post.analyses %}
+                <span class="analysis-badge {{ analysis.metadata.model }}">
+                    {{ analysis.metadata.analysis_type }}
+                </span>
+                {% endfor %}
+            </div>
             {% endif %}
         </div>
         {% endfor %}
@@ -408,6 +397,34 @@
                 hideDeleteConfirmation();
             }
         }
+
+        // Convert UTC timestamps to relative time
+        document.addEventListener('DOMContentLoaded', function() {
+            const timeElements = document.querySelectorAll('.post-stats span:last-child');
+            timeElements.forEach(element => {
+                const timestamp = new Date(element.textContent);
+                if (!isNaN(timestamp)) {
+                    const now = new Date();
+                    const diffInSeconds = Math.floor((now - timestamp) / 1000);
+                    
+                    let timeAgo;
+                    if (diffInSeconds < 60) {
+                        timeAgo = `${diffInSeconds} seconds ago`;
+                    } else if (diffInSeconds < 3600) {
+                        const minutes = Math.floor(diffInSeconds / 60);
+                        timeAgo = `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+                    } else if (diffInSeconds < 86400) {
+                        const hours = Math.floor(diffInSeconds / 3600);
+                        timeAgo = `${hours} hour${hours === 1 ? '' : 's'} ago`;
+                    } else {
+                        const days = Math.floor(diffInSeconds / 86400);
+                        timeAgo = `${days} day${days === 1 ? '' : 's'} ago`;
+                    }
+                    
+                    element.textContent = timeAgo;
+                }
+            });
+        });
     </script>
 </body>
 </html> 

@@ -17,7 +17,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class VectorStore:
-    """Vector store for transcript segments with enhanced context and metadata."""
+    """Vector store for transcript segments and Reddit posts with enhanced context and metadata."""
     
     def __init__(self, persist_directory: str = "chroma_db"):
         """Initialize the vector store with the specified persistence directory."""
@@ -33,19 +33,32 @@ class VectorStore:
                 model_name="BAAI/bge-m3"
             )
             
-            # Create or get the collection
+            # Create or get collections
             try:
-                self.collection = self.client.get_collection(
+                self.transcript_collection = self.client.get_collection(
                     name="transcript_segments",
                     embedding_function=self.embedding_function
                 )
-                logger.info(f"Using existing collection with {self.collection.count()} items")
+                logger.info(f"Using existing transcript collection with {self.transcript_collection.count()} items")
             except Exception:
-                self.collection = self.client.create_collection(
+                self.transcript_collection = self.client.create_collection(
                     name="transcript_segments",
                     embedding_function=self.embedding_function
                 )
-                logger.info("Created new collection")
+                logger.info("Created new transcript collection")
+                
+            try:
+                self.reddit_collection = self.client.get_collection(
+                    name="reddit_posts",
+                    embedding_function=self.embedding_function
+                )
+                logger.info(f"Using existing Reddit collection with {self.reddit_collection.count()} items")
+            except Exception:
+                self.reddit_collection = self.client.create_collection(
+                    name="reddit_posts",
+                    embedding_function=self.embedding_function
+                )
+                logger.info("Created new Reddit collection")
                 
         except Exception as e:
             logger.error(f"Error initializing vector store: {str(e)}")
@@ -249,7 +262,7 @@ class VectorStore:
                 
                 # Add the batch to the collection
                 try:
-                    self.collection.add(
+                    self.transcript_collection.add(
                         documents=documents,
                         metadatas=metadatas,
                         ids=ids
@@ -272,7 +285,7 @@ class VectorStore:
             expanded_queries = self._expand_query(query)
             
             # Search with expanded queries
-            results = self.collection.query(
+            results = self.transcript_collection.query(
                 query_texts=expanded_queries,
                 n_results=n_results,
                 where=filter_metadata
@@ -310,7 +323,7 @@ class VectorStore:
         """Get all segments for a specific video."""
         try:
             # Query for all segments with the given video_id
-            results = self.collection.query(
+            results = self.transcript_collection.query(
                 query_texts=[""],  # Empty query to match all documents
                 where={"video_id": video_id},
                 n_results=10000  # Set a high limit to get all segments
@@ -349,7 +362,7 @@ class VectorStore:
         """Delete all segments for a specific video."""
         try:
             # Delete all documents with the given video_id
-            self.collection.delete(
+            self.transcript_collection.delete(
                 where={"video_id": video_id}
             )
             logger.info(f"Deleted all segments for video {video_id}")
@@ -365,7 +378,7 @@ class VectorStore:
             self.client.delete_collection(name="transcript_segments")
             
             # Recreate the collection
-            self.collection = self.client.create_collection(
+            self.transcript_collection = self.client.create_collection(
                 name="transcript_segments",
                 embedding_function=self.embedding_function
             )
@@ -374,4 +387,279 @@ class VectorStore:
             
         except Exception as e:
             logger.error(f"Error clearing vector store: {str(e)}")
-            raise 
+            raise
+
+    def add_reddit_post(self, post_id: str, post_data: Dict[str, Any], batch_size: int = 100) -> None:
+        """Add a Reddit post to the vector store with enhanced context and metadata."""
+        try:
+            # Prepare post content
+            post_content = f"Title: {post_data['title']}\n\n{post_data.get('selftext', '')}"
+            
+            # Create semantic segments from post content
+            content_segments = self._get_semantic_segments(post_content)
+            
+            # Process comments if available
+            comment_segments = []
+            if 'comments' in post_data:
+                for comment in post_data['comments']:
+                    comment_segments.extend(self._get_semantic_segments(comment['body']))
+            
+            # Combine all segments
+            all_segments = content_segments + comment_segments
+            total_segments = len(all_segments)
+            
+            logger.info(f"Processing {total_segments} segments for Reddit post {post_data['id']}")
+            
+            # Process in batches
+            for batch_start in range(0, total_segments, batch_size):
+                batch_end = min(batch_start + batch_size, total_segments)
+                batch = all_segments[batch_start:batch_end]
+                
+                # Prepare documents and metadata for this batch
+                documents = []
+                metadatas = []
+                ids = []
+                
+                # Process each segment in the batch
+                for idx, segment in enumerate(batch):
+                    # Calculate global segment index
+                    segment_index = batch_start + idx
+                    
+                    # Prepare metadata
+                    metadata = {
+                        "post_id": post_data['id'],
+                        "title": post_data['title'],  # Add title to metadata
+                        "subreddit": post_data.get('subreddit', ''),
+                        "author": post_data.get('author', ''),
+                        "created_utc": post_data.get('created_utc', ''),
+                        "score": post_data.get('score', 0),
+                        "num_comments": post_data.get('num_comments', 0),
+                        "content_type": "reddit_post",  # Use consistent content_type
+                        "segment_index": segment_index,
+                        "total_segments": total_segments,
+                        "is_comment": segment_index >= len(content_segments)
+                    }
+                    
+                    # Generate unique ID using global segment index
+                    segment_id = f"reddit_{post_data['id']}_{segment_index}"
+                    
+                    # Add to batch lists
+                    documents.append(segment)
+                    metadatas.append(metadata)
+                    ids.append(segment_id)
+                
+                # Add the batch to the collection
+                try:
+                    self.reddit_collection.add(
+                        documents=documents,
+                        metadatas=metadatas,
+                        ids=ids
+                    )
+                    logger.info(f"Added batch for Reddit post {post_data['id']} (segments {batch_start}-{batch_end-1})")
+                except Exception as e:
+                    logger.error(f"Error adding batch for Reddit post {post_data['id']}: {str(e)}")
+                    raise
+            
+            logger.info(f"Successfully added all {total_segments} segments for Reddit post {post_data['id']}")
+            
+        except Exception as e:
+            logger.error(f"Error processing Reddit post {post_data['id']}: {str(e)}")
+            raise
+
+    def search_reddit(self, query: str, n_results: int = 5, filter_metadata: Optional[Dict] = None) -> List[Dict[str, Any]]:
+        """Search for Reddit post segments matching the query."""
+        try:
+            # Expand query for better retrieval
+            expanded_queries = self._expand_query(query)
+            
+            # Search with expanded queries
+            results = self.reddit_collection.query(
+                query_texts=expanded_queries,
+                n_results=n_results,
+                where=filter_metadata
+            )
+            
+            # Process results
+            processed_results = []
+            
+            for i, (doc_id, document, metadata, distance) in enumerate(zip(
+                results["ids"][0],
+                results["documents"][0],
+                results["metadatas"][0],
+                results["distances"][0]
+            )):
+                # Calculate relevance score (1 - distance, normalized to [0, 1])
+                relevance_score = 1 - min(distance, 1.0)
+                
+                # Create result object
+                result = {
+                    "id": doc_id,
+                    "text": document,
+                    "metadata": metadata,
+                    "relevance_score": round(relevance_score, 3)
+                }
+                
+                processed_results.append(result)
+            
+            return processed_results
+            
+        except Exception as e:
+            logger.error(f"Error searching Reddit posts for query '{query}': {str(e)}")
+            return []
+
+    def get_reddit_post(self, post_id: str) -> List[Dict[str, Any]]:
+        """Get all segments for a specific Reddit post."""
+        try:
+            # Query for all segments with the given post_id
+            results = self.reddit_collection.query(
+                query_texts=[""],  # Empty query to match all documents
+                where={"post_id": post_id},
+                n_results=10000  # Set a high limit to get all segments
+            )
+            
+            # Process results
+            segments = []
+            
+            for i, (doc_id, document, metadata) in enumerate(zip(
+                results["ids"][0],
+                results["documents"][0],
+                results["metadatas"][0]
+            )):
+                # Create segment object
+                segment = {
+                    "id": doc_id,
+                    "text": document,
+                    "is_comment": metadata.get("is_comment", False),
+                    "segment_index": metadata.get("segment_index", i),
+                    "metadata": metadata
+                }
+                
+                segments.append(segment)
+            
+            # Sort segments by index
+            segments.sort(key=lambda x: x["segment_index"])
+            
+            return segments
+            
+        except Exception as e:
+            logger.error(f"Error getting segments for Reddit post {post_id}: {str(e)}")
+            return []
+
+    def delete_reddit_post(self, post_id: str) -> None:
+        """Delete all segments for a specific Reddit post."""
+        try:
+            # Delete all documents with the given post_id
+            self.reddit_collection.delete(
+                where={"post_id": post_id}
+            )
+            logger.info(f"Deleted all segments for Reddit post {post_id}")
+            
+        except Exception as e:
+            logger.error(f"Error deleting segments for Reddit post {post_id}: {str(e)}")
+            raise
+
+    def add_reddit_analysis(self, post_id: str, analysis_type: str, model: str, content: Dict[str, Any]) -> None:
+        """Add a Reddit post analysis to the vector store."""
+        try:
+            # Prepare metadata
+            metadata = content.get('metadata', {})
+            metadata.update({
+                'post_id': post_id,
+                'analysis_type': analysis_type,
+                'model': model,
+                'content_type': 'reddit_analysis'
+            })
+            
+            # Generate unique ID for the analysis
+            analysis_id = f"reddit_{post_id}_{analysis_type}_{model}"
+            
+            # Add to collection
+            self.reddit_collection.add(
+                documents=[content['text']],
+                metadatas=[metadata],
+                ids=[analysis_id]
+            )
+            
+            logger.info(f"Added {analysis_type} analysis for Reddit post {post_id}")
+            
+        except Exception as e:
+            logger.error(f"Error adding Reddit analysis: {str(e)}")
+            raise
+
+    def get_reddit_post_analyses(self, post_id: str) -> List[Dict[str, Any]]:
+        """Get all analyses for a specific Reddit post."""
+        try:
+            # Query for all analyses with the given post_id
+            results = self.reddit_collection.query(
+                query_texts=[""],  # Empty query to match all documents
+                where={
+                    "post_id": post_id,
+                    "content_type": "reddit_analysis"
+                },
+                n_results=10000  # Set a high limit to get all analyses
+            )
+            
+            # Process results
+            analyses = []
+            
+            for doc_id, document, metadata in zip(
+                results["ids"][0],
+                results["documents"][0],
+                results["metadatas"][0]
+            ):
+                analyses.append({
+                    "id": doc_id,
+                    "text": document,
+                    "metadata": metadata
+                })
+            
+            return analyses
+            
+        except Exception as e:
+            logger.error(f"Error getting analyses for Reddit post {post_id}: {str(e)}")
+            return []
+
+    def get_all_reddit_posts(self) -> List[Dict[str, Any]]:
+        """Get all Reddit posts (excluding analyses)."""
+        try:
+            # Query for all posts, but only get the first segment of each post
+            results = self.reddit_collection.query(
+                query_texts=[""],  # Empty query to match all documents
+                where={"$and": [
+                    {"content_type": {"$eq": "reddit_post"}},
+                    {"segment_index": {"$eq": 0}}  # Only get first segment of each post
+                ]},
+                n_results=10000  # Set a high limit to get all posts
+            )
+            
+            # Process results
+            posts = []
+            if results["ids"][0]:  # Check if we have any results
+                for doc_id, document, metadata in zip(
+                    results["ids"][0],
+                    results["documents"][0],
+                    results["metadatas"][0]
+                ):
+                    # Create post object with all necessary fields
+                    post = {
+                        "id": doc_id,
+                        "text": document,
+                        "metadata": {
+                            "post_id": metadata.get("post_id"),
+                            "title": metadata.get("title", "Untitled"),
+                            "author": metadata.get("author", "Unknown"),
+                            "subreddit": metadata.get("subreddit", "Unknown"),
+                            "score": metadata.get("score", 0),
+                            "num_comments": metadata.get("num_comments", 0),
+                            "created_utc": metadata.get("created_utc", 0)
+                        }
+                    }
+                    posts.append(post)
+            
+            # Sort posts by created_utc in descending order (newest first)
+            posts.sort(key=lambda x: x["metadata"]["created_utc"], reverse=True)
+            return posts
+            
+        except Exception as e:
+            logger.error(f"Error getting all Reddit posts: {str(e)}")
+            return [] 
