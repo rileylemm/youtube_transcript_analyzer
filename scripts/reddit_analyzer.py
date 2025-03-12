@@ -73,23 +73,53 @@ class RedditAnalyzer:
 
     def _get_post_dir(self, post_id: str) -> str:
         """Get or create directory for post data."""
-        safe_id = sanitize_filename(post_id)
-        post_dir = os.path.join(self.data_dir, safe_id)
+        # Get the post directory from data/reddit/[post_dir]
+        reddit_base_dir = os.path.join(self.data_dir, 'reddit')
+        index_path = os.path.join(reddit_base_dir, 'post_index.json')
+        
+        # Load the index to get the post directory name
+        with open(index_path, 'r', encoding='utf-8') as f:
+            post_index = json.load(f)
+            
+        if post_id not in post_index:
+            raise ValueError(f"Post {post_id} not found in index")
+            
+        post_info = post_index[post_id]
+        post_dir = os.path.join(reddit_base_dir, post_info['dir_name'])
         os.makedirs(post_dir, exist_ok=True)
         return post_dir
 
     async def save_analysis(self, analysis_content: str, post_id: str, analysis_type: str, model: str = "mistral") -> str:
         """Save analysis results to JSON file."""
         try:
-            post_dir = self._get_post_dir(post_id)
-            filename = generate_reddit_filename(post_id, analysis_type, model)
+            # Get the post directory from data/reddit/[post_dir]
+            reddit_base_dir = os.path.join(self.data_dir, 'reddit')
+            index_path = os.path.join(reddit_base_dir, 'post_index.json')
+            
+            # Load the index to get the post directory name
+            with open(index_path, 'r', encoding='utf-8') as f:
+                post_index = json.load(f)
+                
+            if post_id not in post_index:
+                raise ValueError(f"Post {post_id} not found in index")
+                
+            post_info = post_index[post_id]
+            post_dir = os.path.join(reddit_base_dir, post_info['dir_name'])
+            
+            # Generate filename for the analysis
+            filename = f"{get_timestamp_prefix()}__analysis__{analysis_type}__{model}__{post_id}.json"
             filepath = os.path.join(post_dir, filename)
             
             analysis_data = {
                 'type': analysis_type,
                 'model': model,
                 'content': analysis_content,
-                'timestamp': datetime.now().isoformat()
+                'timestamp': datetime.now().isoformat(),
+                'metadata': {
+                    'analysis_type': analysis_type,
+                    'model': model,
+                    'post_id': post_id
+                }
             }
             
             with open(filepath, 'w', encoding='utf-8') as f:

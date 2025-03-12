@@ -139,13 +139,7 @@ def get_post_analyses(post_id):
         post_info = post_index[post_id]
         post_dir = os.path.join(reddit_base_dir, post_info['dir_name'])
         
-        analyses = {
-            'sentiment': {'mistral': [], 'gpt': []},
-            'technical_summary': {'mistral': [], 'gpt': []},
-            'key_insights': {'mistral': [], 'gpt': []},
-            'action_items': {'mistral': [], 'gpt': []},
-            'questions': {'mistral': [], 'gpt': []}
-        }
+        analyses = {}
         
         for filename in os.listdir(post_dir):
             if '__analysis__' in filename and filename.endswith('.json'):
@@ -155,15 +149,20 @@ def get_post_analyses(post_id):
                         analysis_data = json.load(f)
                         
                     metadata = analysis_data.get('metadata', {})
-                    analysis_type = metadata.get('analysis_type')
-                    model = metadata.get('model', 'mistral')
+                    # Check both root level and metadata for analysis type
+                    analysis_type = analysis_data.get('type') or metadata.get('analysis_type')
+                    model = analysis_data.get('model') or metadata.get('model', 'mistral')
                     
-                    if analysis_type in analyses and model in analyses[analysis_type]:
-                        analyses[analysis_type][model].append({
-                            'content': str(analysis_data.get('content', '')),
-                            'metadata': metadata,
-                            'timestamp': os.path.getmtime(filepath)
-                        })
+                    if analysis_type:
+                        if analysis_type not in analyses:
+                            analyses[analysis_type] = {'mistral': [], 'gpt': []}
+                        
+                        if model in analyses[analysis_type]:
+                            analyses[analysis_type][model].append({
+                                'content': str(analysis_data.get('content', '')),
+                                'metadata': metadata,
+                                'timestamp': os.path.getmtime(filepath)
+                            })
                         
                 except Exception as e:
                     logger.error(f"Error reading analysis file {filename}: {str(e)}")
@@ -172,10 +171,7 @@ def get_post_analyses(post_id):
         # Sort analyses by timestamp
         for analysis_type in analyses:
             for model in analyses[analysis_type]:
-                analyses[analysis_type][model].sort(
-                    key=lambda x: x.get('timestamp', ''),
-                    reverse=True
-                )
+                analyses[analysis_type][model].sort(key=lambda x: x.get('timestamp', 0), reverse=True)
                 
         return analyses
         
@@ -623,12 +619,12 @@ async def analyze_transcript():
             try:
                 # Create a document with metadata for the analysis
                 analysis_doc = {
-                    'text': result['content'],
-                    'start': 0,  # Analysis applies to entire video
-                    'duration': transcript[-1]['start'] + transcript[-1]['duration']  # Total video duration
+                    'text': result,
+                    'type': f'analysis_{analysis_type}',
+                    'model': model,
+                    'post_id': post_id
                 }
-                video_id = f"{safe_title}_{analysis_type}_{model}"
-                vector_store.add_transcript(video_id, [analysis_doc])
+                vector_store.add_reddit_analysis(post_id, analysis_type, model, {'text': result, 'metadata': analysis_doc})
                 logger.info("Added analysis to vector store")
             except Exception as e:
                 logger.error(f"Error adding analysis to vector store: {str(e)}", exc_info=True)
@@ -896,39 +892,42 @@ async def video_page(video_title):
         transcript = []
         transcript_filename = find_latest_file(video_dir, '__transcript__')
         if transcript_filename:
-            transcript_path = os.path.join(video_dir, transcript_filename)
-            with open(transcript_path, 'r', encoding='utf-8') as f:
-                raw_transcript = json.load(f)
-                
-                # Process transcript with minute-based timestamps
-                last_minute = -1
-                current_text = []
-                current_timestamp = None
-                
-                for seg in raw_transcript:
-                    current_minute = int(seg['start']) // 60
+            try:
+                transcript_path = os.path.join(video_dir, transcript_filename)
+                with open(transcript_path, 'r', encoding='utf-8') as f:
+                    raw_transcript = json.load(f)
                     
-                    # If we've moved to a new minute
-                    if current_minute > last_minute:
-                        # If we have accumulated text, add it to transcript
-                        if current_text:
-                            transcript.append({
-                                'timestamp': current_timestamp,
-                                'text': ' '.join(current_text)
-                            })
-                            current_text = []
+                    # Process transcript with minute-based timestamps
+                    last_minute = -1
+                    current_text = []
+                    current_timestamp = None
+                    
+                    for seg in raw_transcript:
+                        current_minute = int(seg['start']) // 60
                         
-                        current_timestamp = f"[{current_minute:02d}:00]"
-                        last_minute = current_minute
+                        # If we've moved to a new minute
+                        if current_minute > last_minute:
+                            # If we have accumulated text, add it to transcript
+                            if current_text:
+                                transcript.append({
+                                    'timestamp': current_timestamp,
+                                    'text': ' '.join(current_text)
+                                })
+                                current_text = []
+                            
+                            current_timestamp = f"[{current_minute:02d}:00]"
+                            last_minute = current_minute
+                        
+                        current_text.append(seg['text'])
                     
-                    current_text.append(seg['text'])
-                
-                # Add any remaining text
-                if current_text:
-                    transcript.append({
-                        'timestamp': current_timestamp or f"[{last_minute:02d}:00]",
-                        'text': ' '.join(current_text)
-                    })
+                    # Add any remaining text
+                    if current_text:
+                        transcript.append({
+                            'timestamp': current_timestamp or f"[{last_minute:02d}:00]",
+                            'text': ' '.join(current_text)
+                        })
+            except Exception as e:
+                logger.error(f"Error reading transcript file: {str(e)}")
 
         # Get analyses
         analyses = {
@@ -1303,312 +1302,337 @@ def fetch_reddit_post():
         logger.error(f"Unexpected error in fetch_reddit_post: {str(e)}", exc_info=True)
         return jsonify({'error': 'An unexpected error occurred. Please try again.'}), 500
 
-@app.route('/reddit/analyze', methods=['POST'])
+@app.route('/analyze_reddit_post', methods=['POST'])
 async def analyze_reddit_post():
-    """Second step: Analyze stored Reddit post."""
     try:
+        logger.debug("Received /analyze_reddit_post request")
         data = request.get_json()
-        post_url = data.get('post_url')
-        analysis_type = data.get('analysis_type')
+        post_id = data.get('post_id')
+        analysis_type = data.get('analysis_type', 'summary')
         model = data.get('model', 'mistral')
         
-        if not all([post_url, analysis_type]):
-            return jsonify({'error': 'Post URL and analysis type are required'}), 400
+        logger.info(f"Analyzing Reddit post: {post_id}")
+        logger.info(f"Analysis type: {analysis_type}, Model: {model}")
+        
+        if not post_id:
+            logger.warning("No post ID provided in request")
+            return jsonify({'error': 'No post ID provided'}), 400
             
-        # Get post data from vector store
-        post_data = reddit_extractor.extract_post(post_url)
-        if not post_data:
+        # Get post directory from index
+        post_index = update_post_index()
+        if post_id not in post_index:
+            logger.error(f"Post {post_id} not found in index")
             return jsonify({'error': 'Post not found'}), 404
             
-        # Run analysis
-        result = await reddit_analyzer.analyze_reddit_post(post_data, analysis_type, model)
-        if not result:
-            return jsonify({'error': 'Analysis failed'}), 500
+        post_info = post_index[post_id]
+        post_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'reddit', post_info['dir_name'])
+        
+        if not os.path.exists(post_dir):
+            logger.error(f"Post directory not found: {post_dir}")
+            return jsonify({'error': 'Post directory not found'}), 404
             
-        if result.success:
-            # Find the post directory
-            reddit_base_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'reddit')
-            safe_title = sanitize_filename(post_data['title'])
-            dir_name = f"{safe_title}__{post_data['id']}"
-            post_dir = os.path.join(reddit_base_dir, dir_name)
+        # Find the most recent post data file
+        post_file = os.path.join(post_dir, post_info['latest_post_file'])
+        if not os.path.exists(post_file):
+            logger.error("Post data file not found")
+            return jsonify({'error': 'Post data not found'}), 404
             
-            if not os.path.exists(post_dir):
-                return jsonify({'error': 'Post directory not found'}), 404
+        try:
+            with open(post_file, 'r', encoding='utf-8') as f:
+                post_data = json.load(f)
+            logger.info("Retrieved post data")
+        except Exception as e:
+            logger.error(f"Error reading post file: {str(e)}", exc_info=True)
+            return jsonify({'error': f'Failed to read post data: {str(e)}'}), 500
             
-            # Save analysis to file
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            analysis_filename = f"{timestamp}__analysis__{analysis_type}__{model}__{safe_title}__{post_data['id']}.json"
-            analysis_filepath = os.path.join(post_dir, analysis_filename)
+        try:
+            if model == 'mistral':
+                logger.info("Analyzing with Mistral model")
+                result = await reddit_analyzer.analyze_with_mistral(post_data, analysis_type)
+            else:
+                logger.info("Analyzing with GPT model")
+                result = await reddit_analyzer.analyze_with_gpt(post_data, analysis_type)
+            logger.info("Analysis completed successfully")
             
-            analysis_data = {
-                'content': result.content,
-                'metadata': {
-                    'post_id': post_data['id'],
-                    'analysis_type': analysis_type,
+            # Add analysis to vector store
+            try:
+                # Create a document with metadata for the analysis
+                analysis_doc = {
+                    'text': result,
+                    'type': f'analysis_{analysis_type}',
                     'model': model,
-                    'timestamp': datetime.now().isoformat()
+                    'post_id': post_id
                 }
-            }
-            
-            try:
-                with open(analysis_filepath, 'w', encoding='utf-8') as f:
-                    json.dump(analysis_data, f, ensure_ascii=False, indent=2)
-                logger.info(f"Saved analysis to {analysis_filepath}")
-            except Exception as e:
-                logger.error(f"Error saving analysis to file: {str(e)}", exc_info=True)
-                # Continue since we can still store in vector DB
-            
-            # Store in vector database
-            try:
-                vector_store.add_reddit_analysis(
-                    post_id=post_data['id'],
-                    analysis_type=analysis_type,
-                    model=model,
-                    content=analysis_data
-                )
-                logger.info(f"Added analysis to vector store for post {post_data['id']}")
+                vector_store.add_reddit_analysis(post_id, analysis_type, model, {'text': result, 'metadata': analysis_doc})
+                logger.info("Added analysis to vector store")
             except Exception as e:
                 logger.error(f"Error adding analysis to vector store: {str(e)}", exc_info=True)
-                # Continue since we already saved to filesystem
-            
-            return jsonify({'content': result.content})
-        else:
-            return jsonify({'error': result.error}), 500
-        
-    except Exception as e:
-        logger.error(f"Error analyzing Reddit post: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/reddit/search', methods=['POST'])
-async def search_reddit_posts():
-    """Search for Reddit posts in the vector store."""
-    try:
-        data = request.get_json()
-        query = data.get('query')
-        n_results = data.get('n_results', 5)
-        
-        if not query:
-            return jsonify({'error': 'No search query provided'}), 400
-            
-        try:
-            results = vector_store.search_reddit(query, n_results=n_results)
-            return jsonify({'results': results})
+                # Continue execution even if vector store update fails
             
         except Exception as e:
-            logger.error(f"Error searching Reddit posts: {str(e)}", exc_info=True)
-            return jsonify({'error': f'Search failed: {str(e)}'}), 500
+            logger.error(f"Error during analysis: {str(e)}", exc_info=True)
+            return jsonify({'error': f'Analysis failed: {str(e)}'}), 500
             
-    except Exception as e:
-        logger.error(f"Error in search_reddit_posts: {str(e)}", exc_info=True)
-        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
-            
-@app.route('/reddit/post/<post_id>')
-def reddit_post_page(post_id):
-    """Display a single Reddit post and its analyses using cached data."""
-    try:
-        logger.info(f"Starting to process Reddit post page for ID: {post_id}")
-        
-        # Get cached post data
-        post_data = get_post_data(post_id)
-        if not post_data:
-            logger.error(f"Post data not found for ID: {post_id}")
-            return render_template('error.html', error='Post not found'), 404
-            
-        # Format post data for template with explicit type conversion and null checks
-        formatted_post = {
-            'id': post_data.get('id', ''),
-            'title': str(post_data.get('title', '')),
-            'author': str(post_data.get('author', '')),
-            'created_utc': int(float(post_data.get('created_utc', 0))),
-            'selftext': str(post_data.get('selftext', '')),
-            'url': str(post_data.get('url', '')),
-            'permalink': str(post_data.get('permalink', '')),
-            'score': int(post_data.get('score', 0)),
-            'upvote_ratio': float(post_data.get('upvote_ratio', 0.0)),
-            'num_comments': int(post_data.get('num_comments', 0))
-        }
-        
-        # Get cached analyses
-        analyses = get_post_analyses(post_id)
-        if not analyses:
-            analyses = {
-                'sentiment': {'mistral': [], 'gpt': []},
-                'technical_summary': {'mistral': [], 'gpt': []},
-                'key_insights': {'mistral': [], 'gpt': []},
-                'action_items': {'mistral': [], 'gpt': []},
-                'questions': {'mistral': [], 'gpt': []}
-            }
-            
-        # Verify data is JSON serializable
         try:
-            logger.info("Testing JSON serialization of data")
-            json.dumps(formatted_post)
-            logger.info("Post data is JSON serializable")
-            json.dumps(analyses)
-            logger.info("Analyses data is JSON serializable")
-        except TypeError as e:
-            logger.error(f"JSON serialization test failed: {str(e)}", exc_info=True)
-            return render_template('error.html', error=f'Data serialization error: {str(e)}'), 500
+            await reddit_analyzer.save_analysis(result, post_id, analysis_type, model)
+            logger.info("Analysis results saved successfully")
+        except Exception as e:
+            logger.error(f"Error saving analysis results: {str(e)}", exc_info=True)
+            # Continue even if saving fails
             
-        logger.info(f"Rendering template with post data: {formatted_post['title']}")
-        return render_template(
-            'reddit_post.html',
-            post=formatted_post,
-            analyses=analyses
-        )
+        return jsonify({'analysis': result})
         
     except Exception as e:
-        logger.error(f"Error displaying Reddit post {post_id}: {str(e)}", exc_info=True)
-        return render_template('error.html', error=str(e)), 500
-
-@app.route('/reddit/library')
-def reddit_library():
-    """Display the Reddit posts library page with pagination."""
-    try:
-        # Get page number from query parameters
-        page = request.args.get('page', 1, type=int)
-        
-        # Get the reddit base directory
-        reddit_base_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'reddit')
-        if not os.path.exists(reddit_base_dir):
-            return render_template('reddit_library.html', posts={}, total_pages=0, current_page=1)
-            
-        # Load or update post index
-        index_path = os.path.join(reddit_base_dir, 'post_index.json')
-        if not os.path.exists(index_path):
-            post_index = update_post_index()
-        else:
-            try:
-                with open(index_path, 'r', encoding='utf-8') as f:
-                    post_index = json.load(f)
-            except Exception:
-                post_index = update_post_index()
-                
-        # Sort posts by creation time (newest first)
-        sorted_posts = sorted(
-            post_index.items(),
-            key=lambda x: x[1]['metadata']['created_utc'],
-            reverse=True
-        )
-        
-        # Calculate pagination
-        total_posts = len(sorted_posts)
-        total_pages = (total_posts + POSTS_PER_PAGE - 1) // POSTS_PER_PAGE
-        page = min(max(1, page), total_pages) if total_pages > 0 else 1
-        
-        # Get posts for current page
-        start_idx = (page - 1) * POSTS_PER_PAGE
-        end_idx = start_idx + POSTS_PER_PAGE
-        current_page_posts = sorted_posts[start_idx:end_idx]
-        
-        # Format posts for template
-        formatted_posts = {}
-        for post_id, post_info in current_page_posts:
-            # Get cached post data
-            post_data = get_post_data(post_id)
-            if not post_data:
-                continue
-                
-            # Get cached analyses
-            analyses = get_post_analyses(post_id)
-            if not analyses:
-                analyses = {
-                    'sentiment': {'mistral': [], 'gpt': []},
-                    'technical_summary': {'mistral': [], 'gpt': []},
-                    'key_insights': {'mistral': [], 'gpt': []},
-                    'action_items': {'mistral': [], 'gpt': []},
-                    'questions': {'mistral': [], 'gpt': []}
-                }
-            
-            # Flatten analyses for display
-            flattened_analyses = []
-            for analysis_type, models in analyses.items():
-                for model, items in models.items():
-                    for item in items:
-                        flattened_analyses.append({
-                            'metadata': {
-                                'analysis_type': analysis_type,
-                                'model': model
-                            },
-                            'content': item.get('content', ''),
-                            'timestamp': item.get('timestamp', '')
-                        })
-                
-            formatted_posts[post_id] = {
-                'metadata': post_info['metadata'],
-                'text': str(post_data.get('selftext', '')),
-                'analyses': flattened_analyses
-            }
-            
-        return render_template(
-            'reddit_library.html',
-            posts=formatted_posts,
-            total_pages=total_pages,
-            current_page=page
-        )
-        
-    except Exception as e:
-        logger.error(f"Error loading Reddit library: {str(e)}", exc_info=True)
-        return render_template('reddit_library.html', posts={}, error=str(e), total_pages=0, current_page=1)
-
-@app.route('/delete_reddit_post', methods=['POST'])
-def delete_reddit_post():
-    """Delete a Reddit post and all its analyses."""
-    try:
-        post_id = request.json.get('post_id')
-        if not post_id:
-            return jsonify({'error': 'No post ID provided'}), 400
-
-        # Find the post directory
-        reddit_base_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'reddit')
-        post_dir = None
-        for dirname in os.listdir(reddit_base_dir):
-            if dirname.endswith(f"__{post_id}"):
-                post_dir = os.path.join(reddit_base_dir, dirname)
-                break
-
-        if not post_dir or not os.path.exists(post_dir):
-            return jsonify({'error': 'Post not found'}), 404
-
-        # Delete the entire post directory
-        shutil.rmtree(post_dir)
-        logger.info(f"Successfully deleted Reddit post directory: {post_dir}")
-        
-        return jsonify({'success': True})
-
-    except Exception as e:
-        logger.error(f"Error deleting Reddit post: {str(e)}", exc_info=True)
+        logger.error(f"Error in analyze_reddit_post: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
-@app.route('/reddit/delete_analysis', methods=['POST'])
+@app.route('/delete_reddit_analysis', methods=['POST'])
 def delete_reddit_analysis():
-    """Delete a specific Reddit post analysis."""
     try:
+        logger.debug("Received /delete_reddit_analysis request")
         data = request.get_json()
-        filepath = data.get('filepath')
         
-        if not filepath:
-            return jsonify({'error': 'No filepath provided'}), 400
+        post_id = data.get('post_id')
+        analysis_type = data.get('analysis_type')
+        model = data.get('model')
+        timestamp = data.get('timestamp')
+        
+        if not all([post_id, analysis_type, model, timestamp]):
+            return jsonify({'error': 'Missing required parameters'}), 400
+            
+        # Get post directory
+        post_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'reddit', post_id)
+        
+        if not os.path.exists(post_dir):
+            return jsonify({'error': 'Post not found'}), 404
+            
+        # Find the analysis file with matching timestamp
+        target_file = None
+        for filename in os.listdir(post_dir):
+            if (f'__analysis__{analysis_type}__{model}__' in filename and 
+                filename.endswith('.json')):
+                filepath = os.path.join(post_dir, filename)
+                if abs(os.path.getmtime(filepath) - float(timestamp)) < 1:  # Within 1 second
+                    target_file = filepath
+                    break
+        
+        if not target_file:
+            logger.error(f"Analysis file not found: {target_file}")
+            return jsonify({'error': 'Analysis file not found'}), 404
             
         try:
-            # Verify the file exists and is within the upload folder
-            abs_filepath = os.path.abspath(filepath)
-            if not abs_filepath.startswith(os.path.abspath(app.config['UPLOAD_FOLDER'])):
-                return jsonify({'error': 'Invalid filepath'}), 400
-                
-            if os.path.exists(filepath):
-                os.remove(filepath)
-                return jsonify({'success': True})
-            else:
-                return jsonify({'error': 'File not found'}), 404
-                
+            os.remove(target_file)
+            return jsonify({'success': True})
         except Exception as e:
-            logger.error(f"Error deleting analysis file: {str(e)}", exc_info=True)
+            logger.error(f"Error deleting analysis file: {str(e)}")
             return jsonify({'error': f'Failed to delete analysis: {str(e)}'}), 500
             
     except Exception as e:
         logger.error(f"Error in delete_reddit_analysis: {str(e)}", exc_info=True)
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
+@app.route('/reddit/library')
+def reddit_library():
+    """Serve the Reddit library page."""
+    logger.debug("Serving Reddit library page")
+    
+    try:
+        # Update the post index
+        post_index = update_post_index()
+        
+        # Get the current page from query parameters
+        page = request.args.get('page', 1, type=int)
+        
+        # Calculate pagination
+        total_posts = len(post_index)
+        total_pages = (total_posts + POSTS_PER_PAGE - 1) // POSTS_PER_PAGE
+        start_idx = (page - 1) * POSTS_PER_PAGE
+        end_idx = start_idx + POSTS_PER_PAGE
+        
+        # Get the slice of posts for the current page
+        current_page_posts = dict(list(post_index.items())[start_idx:end_idx])
+        
+        # Add analyses to each post
+        formatted_posts = {}
+        for post_id, post_info in current_page_posts.items():
+            analyses = get_post_analyses(post_id)
+            if analyses:
+                # Flatten analyses for display
+                flattened_analyses = []
+                for analysis_type, models in analyses.items():
+                    for model, items in models.items():
+                        for analysis in items:
+                            flattened_analyses.append({
+                                'analysis': analysis['content'],
+                                'metadata': {
+                                    'analysis_type': analysis_type,
+                                    'model': model,
+                                    'timestamp': analysis.get('timestamp', '')
+                                }
+                            })
+                post_info['analyses'] = flattened_analyses
+            else:
+                post_info['analyses'] = []
+            
+            formatted_posts[post_id] = post_info
+        
+        return render_template(
+            'reddit_library.html',
+            posts=formatted_posts,
+            current_page=page,
+            total_pages=total_pages
+        )
+        
+    except Exception as e:
+        logger.error(f"Error serving Reddit library page: {str(e)}", exc_info=True)
+        return render_template('reddit_library.html', posts={}, error=str(e))
+
+@app.route('/reddit/post/<post_id>')
+def reddit_post(post_id):
+    """Serve the Reddit post page."""
+    try:
+        logger.debug(f"Serving Reddit post page for post_id: {post_id}")
+        
+        # Get post data
+        post_data = get_post_data(post_id)
+        if not post_data:
+            logger.error(f"Post data not found for post_id: {post_id}")
+            return render_template('error.html', error="Post not found"), 404
+            
+        # Get analyses
+        analyses = get_post_analyses(post_id)
+        if analyses:
+            # Flatten analyses for display
+            flattened_analyses = []
+            for analysis_type, models in analyses.items():
+                for model, items in models.items():
+                    for analysis in items:
+                        flattened_analyses.append({
+                            'analysis': analysis['content'],
+                            'metadata': {
+                                'analysis_type': analysis_type,
+                                'model': model,
+                                'timestamp': analysis.get('timestamp', '')
+                            }
+                        })
+        else:
+            flattened_analyses = []
+        
+        # Format post data for template
+        formatted_post = {
+            'id': post_id,
+            'title': post_data['title'],
+            'author': post_data['author'],
+            'subreddit': post_data['subreddit'],
+            'score': post_data['score'],
+            'upvote_ratio': post_data.get('upvote_ratio', 0.0),
+            'num_comments': post_data['num_comments'],
+            'created_utc': post_data['created_utc'],
+            'selftext': post_data['selftext'],
+            'url': post_data.get('url', ''),
+            'permalink': post_data.get('permalink', '')
+        }
+        
+        return render_template(
+            'reddit_post.html',
+            post=formatted_post,
+            analyses=flattened_analyses
+        )
+        
+    except Exception as e:
+        logger.error(f"Error serving Reddit post page: {str(e)}", exc_info=True)
+        return render_template('error.html', error=str(e)), 500
+
+@app.route('/delete_reddit_post', methods=['POST'])
+def delete_reddit_post():
+    """Delete a Reddit post and its associated files."""
+    try:
+        logger.debug("Received /delete_reddit_post request")
+        data = request.get_json()
+        post_id = data.get('post_id')
+        
+        if not post_id:
+            logger.warning("No post ID provided")
+            return jsonify({'error': 'Post ID is required'}), 400
+            
+        # Get post directory from index
+        post_index = update_post_index()
+        if post_id not in post_index:
+            logger.error(f"Post {post_id} not found in index")
+            return jsonify({'error': 'Post not found'}), 404
+            
+        post_info = post_index[post_id]
+        post_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'reddit', post_info['dir_name'])
+        
+        if not os.path.exists(post_dir):
+            logger.error(f"Post directory not found: {post_dir}")
+            return jsonify({'error': 'Post directory not found'}), 404
+            
+        try:
+            # Delete from vector store first
+            try:
+                # Delete post content
+                vector_store.delete_reddit_post(post_id)
+                
+                # Delete all analyses
+                analyses = get_post_analyses(post_id)
+                if analyses:
+                    for analysis_type in analyses:
+                        for model in analyses[analysis_type]:
+                            vector_store.delete_reddit_analysis(post_id, analysis_type, model)
+                logger.info("Deleted post data from vector store")
+            except Exception as e:
+                logger.error(f"Error deleting from vector store: {str(e)}", exc_info=True)
+                # Continue with file deletion even if vector store deletion fails
+            
+            # Remove all files in the directory
+            for filename in os.listdir(post_dir):
+                file_path = os.path.join(post_dir, filename)
+                try:
+                    if os.path.isfile(file_path):
+                        os.unlink(file_path)
+                except Exception as e:
+                    logger.error(f"Error deleting file {file_path}: {str(e)}")
+            
+            # Remove the directory
+            os.rmdir(post_dir)
+            
+            # Update the post index
+            update_post_index()
+            
+            return jsonify({'success': True})
+            
+        except Exception as e:
+            logger.error(f"Error deleting post directory: {str(e)}")
+            return jsonify({'error': f'Failed to delete post: {str(e)}'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error in delete_reddit_post: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
+# Add markdown filter
+@app.template_filter('markdown')
+def markdown_filter(text):
+    """Convert markdown text to HTML with advanced features."""
+    if not text:
+        return ""
+    try:
+        import markdown2
+        extras = [
+            "fenced-code-blocks",   # Support ```code blocks```
+            "tables",               # Support markdown tables
+            "break-on-newline",     # Support line breaks
+            "cuddled-lists",        # Better list handling
+            "code-friendly",        # Better code block handling
+            "numbering",            # Support numbered lists
+            "strike",               # Support ~~strikethrough~~
+            "task_list",            # Support [ ] task lists
+            "wiki-tables",          # Support more complex tables
+            "header-ids"            # Add IDs to headers for linking
+        ]
+        return markdown2.markdown(text, extras=extras, safe_mode=False)
+    except ImportError:
+        return text.replace('\n', '<br>')
 
 if __name__ == '__main__':
     logger.info("Starting Flask application")

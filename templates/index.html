@@ -961,26 +961,47 @@
                 button.disabled = true;
                 button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Analyzing...';
                 
-                const response = await fetch('/reddit/analyze', {
+                // First fetch the post
+                const fetchResponse = await fetch('/reddit/fetch', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        post_url: urlInput.value,
+                        post_url: urlInput.value
+                    })
+                });
+                
+                const postData = await fetchResponse.json();
+                
+                if (!fetchResponse.ok) {
+                    throw new Error(postData.error || 'Failed to fetch post');
+                }
+                
+                // Then analyze the fetched post
+                const analysisResponse = await fetch('/analyze_reddit_post', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        post_id: postData.post_id,
                         analysis_type: analysisType,
                         model: model
                     })
                 });
                 
-                const data = await response.json();
+                const analysisData = await analysisResponse.json();
                 
-                if (response.ok) {
+                if (analysisResponse.ok) {
                     // Display analysis result with markdown formatting
-                    analysisContent.innerHTML = marked.parse(data.content);
+                    analysisContent.innerHTML = marked.parse(analysisData.analysis);
                     analysisResult.style.display = 'block';
+                    
+                    // Redirect to the post page to see all analyses
+                    window.location.href = `/reddit/post/${postData.post_id}`;
                 } else {
-                    throw new Error(data.error || 'Analysis failed');
+                    throw new Error(analysisData.error || 'Analysis failed');
                 }
             } catch (error) {
                 console.error('Error:', error);
@@ -989,7 +1010,7 @@
             } finally {
                 // Reset button state
                 button.disabled = false;
-                button.textContent = button.textContent.replace('Analyzing...', '');
+                button.textContent = analysisType;
             }
         }
     </script>

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ post.title }} - Reddit Post Analyzer</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
@@ -154,10 +155,61 @@
         }
 
         .content-segment {
-            margin-bottom: 20px;
-            padding: 15px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            padding: 20px;
+            background: #fff;
             border-radius: 8px;
-            background: #f8f9fa;
+        }
+
+        .content-segment h1 {
+            font-size: 1.8em;
+            font-weight: 600;
+            margin: 1.5em 0 1em;
+            color: #1a1a1a;
+        }
+
+        .content-segment h2 {
+            font-size: 1.5em;
+            font-weight: 600;
+            margin: 1.2em 0 0.8em;
+            color: #1a1a1a;
+        }
+
+        .content-segment h3 {
+            font-size: 1.2em;
+            font-weight: 600;
+            margin: 1em 0 0.6em;
+            color: #1a1a1a;
+        }
+
+        .content-segment strong {
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        .content-segment .text-line {
+            margin: 0.8em 0;
+            line-height: 1.6;
+        }
+
+        .content-segment .list-item {
+            margin: 0.5em 0 0.5em 1.5em;
+            position: relative;
+        }
+
+        .content-segment .list-item::before {
+            content: "•";
+            position: absolute;
+            left: -1em;
+            color: #666;
+        }
+
+        .content-segment br {
+            display: block;
+            margin: 0.5em 0;
+            content: "";
         }
 
         .comment-segment {
@@ -174,20 +226,24 @@
             margin-bottom: 5px;
         }
 
+        .analysis-controls {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
         .analysis-section {
             margin-bottom: 30px;
         }
 
-        .analysis-section h3 {
-            color: #2c3e50;
-            margin-bottom: 15px;
-        }
-
         .analysis-item {
-            background: #f8f9fa;
+            position: relative;
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
             border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
 
         .analysis-header {
@@ -219,46 +275,53 @@
             font-size: 0.9em;
         }
 
-        .message-menu-button {
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-size: 1.2em;
-            color: #666;
-            padding: 4px;
-            border-radius: 4px;
-        }
-
-        .message-menu-button:hover {
-            background: #eee;
-        }
-
         .message-menu {
             position: absolute;
+            top: 100%;
+            right: 0;
             background: white;
+            border: 1px solid #dee2e6;
             border-radius: 4px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             display: none;
-            z-index: 10;
+            z-index: 1000;
         }
 
         .message-menu.show {
             display: block;
         }
 
+        .message-menu-button {
+            background: none;
+            border: none;
+            color: #6c757d;
+            cursor: pointer;
+            padding: 4px 8px;
+            font-size: 16px;
+            position: absolute;
+            right: 0;
+            top: 0;
+        }
+
+        .message-menu-button:hover {
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+
         .message-menu-item {
             display: block;
             width: 100%;
-            padding: 8px 12px;
-            text-align: left;
+            padding: 8px 16px;
             border: none;
             background: none;
+            text-align: left;
             cursor: pointer;
-            color: #dc3545;
+            white-space: nowrap;
+            color: #212529;
         }
 
         .message-menu-item:hover {
-            background: #f8f9fa;
+            background-color: #f8f9fa;
         }
 
         .analysis-content {
@@ -315,16 +378,14 @@
         <div class="header">
             <h1>{{ post.title }}</h1>
             <div class="post-meta">
-                Posted by u/{{ post.author }} in 
-                <a href="https://reddit.com/r/{{ post.subreddit }}" target="_blank">r/{{ post.subreddit }}</a>
-                • {{ post.score }} points • {{ post.num_comments }} comments
-                • <span class="timestamp">{{ post.created_utc|timestamp }}</span>
+                Posted by <a href="https://reddit.com/u/{{ post.author }}" target="_blank">u/{{ post.author }}</a>
+                • {{ post.created_utc|timestamp }}
+                • {{ post.score }} points
+                • {{ post.upvote_ratio * 100 }}% upvoted
             </div>
             <div class="nav-links">
                 <a href="/reddit/library">← Back to Library</a>
-                <a href="/" class="back-link">Back to Analyzer</a>
-                <a href="https://reddit.com{{ post.permalink }}" 
-                   class="reddit-link" target="_blank">
+                <a href="{{ post.url }}" target="_blank" class="reddit-link">
                     <span class="reddit-icon">🔗</span> View on Reddit
                 </a>
             </div>
@@ -334,14 +395,22 @@
             <div class="stat-card">
                 <h3>Score</h3>
                 <div class="value">{{ post.score }}</div>
+                <div class="label">points</div>
             </div>
             <div class="stat-card">
                 <h3>Comments</h3>
                 <div class="value">{{ post.num_comments }}</div>
+                <div class="label">total comments</div>
             </div>
             <div class="stat-card">
                 <h3>Analyses</h3>
                 <div class="value">{{ analyses|length }}</div>
+                <div class="label">total analyses</div>
+            </div>
+            <div class="stat-card">
+                <h3>Upvote Ratio</h3>
+                <div class="value">{{ (post.upvote_ratio * 100)|round|int }}%</div>
+                <div class="label">upvoted</div>
             </div>
         </div>
 
@@ -351,93 +420,219 @@
         </div>
 
         <div class="tab-content">
-            <div id="content" class="tab-pane active">
+            <div id="content-tab" class="tab-pane active">
                 <div class="content-segment">
-                    <div id="post-content" data-content="{{ post.selftext }}"></div>
+                    {% for line in post.selftext.split('\n') %}
+                        {% if line.startswith('# ') %}
+                            <h1>{{ line[2:] }}</h1>
+                        {% elif line.startswith('## ') %}
+                            <h2>{{ line[3:] }}</h2>
+                        {% elif line.startswith('### ') %}
+                            <h3>{{ line[4:] }}</h3>
+                        {% elif line.startswith('**') and line.endswith('**') %}
+                            <strong>{{ line[2:-2] }}</strong><br>
+                        {% elif line.strip().startswith('*') %}
+                            <div class="list-item">{{ line.strip()[2:] }}</div>
+                        {% elif line.strip() %}
+                            <div class="text-line">{{ line }}</div>
+                        {% else %}
+                            <br>
+                        {% endif %}
+                    {% endfor %}
                 </div>
+                {% if post.comments %}
+                <h3>Top Comments</h3>
+                {% for comment in post.comments %}
+                <div class="comment-segment">
+                    <div class="comment-author">u/{{ comment.author }}</div>
+                    {% for line in comment.body.split('\n') %}
+                        {% if line.strip() %}
+                            <div class="text-line">{{ line }}</div>
+                        {% else %}
+                            <br>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+                {% endfor %}
+                {% endif %}
             </div>
 
-            <div id="analyses" class="tab-pane">
-                {% for analysis_type, models in analyses.items() %}
-                    {% if models.mistral or models.gpt %}
-                        <div class="analysis-section">
-                            <h3>{{ analysis_type|title|replace('_', ' ') }}</h3>
-                            {% for model, items in models.items() %}
-                                {% for item in items %}
-                                    <div class="analysis-item">
-                                        <div class="analysis-header">
-                                            <span class="model-badge {{ model }}">{{ model }}</span>
-                                            <span class="timestamp">{{ item.timestamp|timestamp }}</span>
-                                        </div>
-                                        <div class="analysis-content">{{ item.content }}</div>
-                                    </div>
-                                {% endfor %}
-                            {% endfor %}
+            <div id="analyses-tab" class="tab-pane">
+                <div class="analysis-controls">
+                    <h4>Generate New Analysis</h4>
+                    <div class="row g-3 align-items-center">
+                        <div class="col-auto">
+                            <select id="analysisType" class="form-select">
+                                <option value="sentiment">Sentiment Analysis</option>
+                                <option value="keywords">Keywords & Topics</option>
+                                <option value="engagement">Engagement Analysis</option>
+                                <option value="summary">Summary</option>
+                                <option value="top_comments">Top Comments Analysis</option>
+                                <option value="tools_workflow">Tools & Workflow Analysis</option>
+                                <option value="prompting_patterns">Prompting Patterns</option>
+                                <option value="code_review">Code Review</option>
+                            </select>
                         </div>
-                    {% endif %}
+                        <div class="col-auto">
+                            <select id="modelType" class="form-select">
+                                <option value="mistral">Mistral</option>
+                                <option value="gpt">GPT</option>
+                            </select>
+                        </div>
+                        <div class="col-auto">
+                            <button onclick="analyzeRedditPost()" class="btn btn-primary">
+                                Analyze
+                            </button>
+                        </div>
+                        <div class="col-auto">
+                            <div id="analysisStatus" class="text-muted" style="display: none;">
+                                <div class="spinner-border spinner-border-sm" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                Analyzing...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {% for analysis in analyses %}
+                <div class="analysis-item">
+                    <div class="analysis-header">
+                        <span class="model-badge {{ analysis.metadata.model }}">{{ analysis.metadata.model|upper }}</span>
+                        <span class="analysis-type">{{ analysis.metadata.analysis_type|replace('_', ' ')|title }}</span>
+                        <span class="timestamp">{{ analysis.metadata.timestamp|timestamp }}</span>
+                        <button class="message-menu-button" onclick="toggleAnalysisMenu(event, this)">⋮</button>
+                        <div class="message-menu">
+                            <button class="message-menu-item" onclick="deleteAnalysis('{{ post.id }}', '{{ analysis.metadata.analysis_type }}', '{{ analysis.metadata.model }}', {{ analysis.metadata.timestamp }})">
+                                🗑️ Delete
+                            </button>
+                        </div>
+                    </div>
+                    <div class="analysis-content">
+                        {% for line in analysis.analysis.split('\n') %}
+                            {% if line.startswith('# ') %}
+                                <h1>{{ line[2:] }}</h1>
+                            {% elif line.startswith('## ') %}
+                                <h2>{{ line[3:] }}</h2>
+                            {% elif line.startswith('### ') %}
+                                <h3>{{ line[4:] }}</h3>
+                            {% elif line.startswith('**') and line.endswith('**') %}
+                                <strong>{{ line[2:-2] }}</strong><br>
+                            {% elif line.strip().startswith('*') %}
+                                <div class="list-item">{{ line.strip()[2:] }}</div>
+                            {% elif line.strip() %}
+                                <div class="text-line">{{ line }}</div>
+                            {% else %}
+                                <br>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
                 {% endfor %}
             </div>
         </div>
     </div>
 
     <script>
-        // Convert markdown to HTML
         document.addEventListener('DOMContentLoaded', function() {
-            const postContent = document.getElementById('post-content');
-            const rawContent = postContent.getAttribute('data-content');
-            console.log('Raw content type:', typeof rawContent);
-            console.log('Raw content length:', rawContent ? rawContent.length : 0);
-            console.log('Raw content:', rawContent);
-            
-            // Use the content directly since it's already a string
-            postContent.innerHTML = marked.parse(rawContent);
-            console.log('Final HTML:', postContent.innerHTML);
-        });
+            showTab('content');
 
-        // Tab switching
-        function showTab(tabId) {
-            // Hide all tab panes
-            document.querySelectorAll('.tab-pane').forEach(pane => {
-                pane.classList.remove('active');
-            });
-            
-            // Show selected tab pane
-            document.getElementById(tabId).classList.add('active');
-            
-            // Update tab buttons
-            document.querySelectorAll('.tab-button').forEach(button => {
-                button.classList.remove('active');
-            });
-            document.querySelector(`[onclick="showTab('${tabId}')"]`).classList.add('active');
-        }
-
-        // Convert timestamps to relative time
-        document.addEventListener('DOMContentLoaded', function() {
-            const timeElements = document.querySelectorAll('.timestamp');
-            timeElements.forEach(element => {
-                const timestamp = new Date(element.textContent);
-                if (!isNaN(timestamp)) {
-                    const now = new Date();
-                    const diffInSeconds = Math.floor((now - timestamp) / 1000);
-                    
-                    let timeAgo;
-                    if (diffInSeconds < 60) {
-                        timeAgo = `${diffInSeconds} seconds ago`;
-                    } else if (diffInSeconds < 3600) {
-                        const minutes = Math.floor(diffInSeconds / 60);
-                        timeAgo = `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
-                    } else if (diffInSeconds < 86400) {
-                        const hours = Math.floor(diffInSeconds / 3600);
-                        timeAgo = `${hours} hour${hours === 1 ? '' : 's'} ago`;
-                    } else {
-                        const days = Math.floor(diffInSeconds / 86400);
-                        timeAgo = `${days} day${days === 1 ? '' : 's'} ago`;
-                    }
-                    
-                    element.textContent = timeAgo;
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('.message-menu') && !e.target.closest('.message-menu-button')) {
+                    document.querySelectorAll('.message-menu.show').forEach(menu => {
+                        menu.classList.remove('show');
+                    });
                 }
             });
         });
+
+        function showTab(tabName) {
+            document.querySelectorAll('.tab-pane').forEach(tab => {
+                tab.style.display = 'none';
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+
+            document.getElementById(tabName + '-tab').style.display = 'block';
+            document.getElementById(tabName + '-tab').classList.add('active');
+            document.querySelector(`button[onclick="showTab('${tabName}')"]`).classList.add('active');
+        }
+
+        function toggleAnalysisMenu(event, button) {
+            event.stopPropagation();
+            const menu = button.nextElementSibling;
+            document.querySelectorAll('.message-menu.show').forEach(m => {
+                if (m !== menu) m.classList.remove('show');
+            });
+            menu.classList.toggle('show');
+        }
+
+        async function deleteAnalysis(postId, analysisType, model, timestamp) {
+            if (!confirm('Are you sure you want to delete this analysis?')) return;
+            
+            try {
+                const response = await fetch('/delete_reddit_analysis', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        post_id: postId,
+                        analysis_type: analysisType,
+                        model: model,
+                        timestamp: timestamp
+                    })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to delete analysis');
+                }
+                
+                window.location.reload();
+                
+            } catch (error) {
+                console.error('Error deleting analysis:', error);
+                alert('Error deleting analysis: ' + error.message);
+            }
+        }
+
+        async function analyzeRedditPost() {
+            const analysisType = document.getElementById('analysisType').value;
+            const model = document.getElementById('modelType').value;
+            const statusDiv = document.getElementById('analysisStatus');
+            
+            try {
+                statusDiv.style.display = 'block';
+                
+                const response = await fetch('/analyze_reddit_post', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        post_id: '{{ post.id }}',
+                        analysis_type: analysisType,
+                        model: model
+                    })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to analyze post');
+                }
+                
+                window.location.reload();
+                
+            } catch (error) {
+                console.error('Error analyzing post:', error);
+                alert('Error analyzing post: ' + error.message);
+            } finally {
+                statusDiv.style.display = 'none';
+            }
+        }
     </script>
 </body>
 </html> 
