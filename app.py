@@ -3,6 +3,8 @@ from scripts.youtube_transcript import (
     get_transcript, get_video_title, save_video_metadata
 )
 from scripts.transcript_analyzer import TranscriptAnalyzer
+from scripts.reddit_analyzer import RedditAnalyzer
+from reddit_scraper.reddit_extractor import RedditExtractor
 # from scripts.vector_store import VectorStore  # Old import
 from vector_db.vector_store import VectorStore  # New import from dedicated directory
 from dotenv import load_dotenv
@@ -14,12 +16,10 @@ from datetime import datetime
 import aiofiles
 import urllib.parse
 from typing import Optional, Dict
+from werkzeug.utils import secure_filename
 
-# Configure detailed logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -29,9 +29,11 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'data')
 app.config['CHROMA_DIR'] = os.path.join(os.path.dirname(__file__), 'chroma_db')
 
-# Initialize transcript analyzer with OpenAI API key
+# Initialize analyzers with OpenAI API key
 openai_api_key = os.getenv('OPENAI_API_KEY')
 analyzer = TranscriptAnalyzer(openai_api_key=openai_api_key)
+reddit_analyzer = RedditAnalyzer(openai_api_key=openai_api_key)
+reddit_extractor = RedditExtractor()
 
 # Initialize vector store
 vector_store = VectorStore(persist_directory=app.config['CHROMA_DIR'])
@@ -231,16 +233,21 @@ def library():
     
     try:
         # Scan the data directory
-        for video_dir_name in os.listdir(app.config['UPLOAD_FOLDER']):
-            video_path = os.path.join(app.config['UPLOAD_FOLDER'], video_dir_name)
+        for item in os.listdir(app.config['UPLOAD_FOLDER']):
+            item_path = os.path.join(app.config['UPLOAD_FOLDER'], item)
             
-            # Skip if not a directory
-            if not os.path.isdir(video_path):
+            # Skip if not a directory, if it's a reddit post, or if it doesn't have a transcript file
+            if not os.path.isdir(item_path) or item.startswith('reddit_'):
+                continue
+                
+            # Check for transcript file to confirm it's a video entry
+            transcript_file = find_latest_file(item_path, '__transcript__')
+            if not transcript_file:
                 continue
                 
             # Initialize video entry
-            videos[video_dir_name] = {
-                'video_dir': video_path,
+            videos[item] = {
+                'video_dir': item_path,
                 'original_transcript': None,
                 'analyses': {
                     'technical_summary': {'mistral': [], 'gpt': []},
@@ -251,18 +258,16 @@ def library():
                 }
             }
             
-            # Find latest transcript file
-            transcript_file = find_latest_file(video_path, '__transcript__')
-            if transcript_file:
-                videos[video_dir_name]['original_transcript'] = {
-                    'filename': os.path.basename(transcript_file),
-                    'timestamp': os.path.getmtime(transcript_file)
-                }
+            # Add transcript info
+            videos[item]['original_transcript'] = {
+                'filename': os.path.basename(transcript_file),
+                'timestamp': os.path.getmtime(transcript_file)
+            }
             
             # Scan files in the video directory for analyses
-            for filename in os.listdir(video_path):
+            for filename in os.listdir(item_path):
                 if '__analysis__' in filename and filename.endswith('.json'):
-                    filepath = os.path.join(video_path, filename)
+                    filepath = os.path.join(item_path, filename)
                     try:
                         with open(filepath, 'r', encoding='utf-8') as f:
                             analysis_data = json.load(f)
@@ -274,15 +279,15 @@ def library():
                             model = parts[3]
                             timestamp = os.path.getmtime(filepath)
                             
-                            if analysis_type in videos[video_dir_name]['analyses']:
-                                videos[video_dir_name]['analyses'][analysis_type][model].append({
+                            if analysis_type in videos[item]['analyses']:
+                                videos[item]['analyses'][analysis_type][model].append({
                                     'filename': filename,
                                     'timestamp': timestamp,
                                     'filepath': filepath
                                 })
                                 
                                 # Sort analyses by timestamp (newest first)
-                                videos[video_dir_name]['analyses'][analysis_type][model].sort(
+                                videos[item]['analyses'][analysis_type][model].sort(
                                     key=lambda x: x['timestamp'],
                                     reverse=True
                                 )
@@ -295,14 +300,14 @@ def library():
             timestamps = []
             
             # Check original transcript
-            if video_data['original_transcript']:
-                timestamps.append(video_data['original_transcript']['timestamp'])
+            if video_data.get('original_transcript'):
+                timestamps.append(video_data['original_transcript'].get('timestamp', 0))
             
             # Check all analyses
-            for analysis_type in video_data['analyses']:
+            for analysis_type in video_data.get('analyses', {}):
                 for model in video_data['analyses'][analysis_type]:
                     for analysis in video_data['analyses'][analysis_type][model]:
-                        timestamps.append(analysis['timestamp'])
+                        timestamps.append(analysis.get('timestamp', 0))
             
             return max(timestamps) if timestamps else 0
         
@@ -1073,6 +1078,285 @@ def get_backup_schedule():
     except Exception as e:
         logger.error(f"Error getting backup schedule: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/reddit/fetch', methods=['POST'])
+def fetch_reddit_post():
+    """First step: Fetch and store Reddit post content."""
+    try:
+        data = request.get_json()
+        post_url = data.get('post_url')
+        
+        if not post_url:
+            logger.warning("No post URL provided")
+            return jsonify({'error': 'Post URL is required'}), 400
+            
+        logger.info(f"Attempting to fetch Reddit post: {post_url}")
+            
+        # Extract post data
+        try:
+            post_data = reddit_extractor.extract_post(post_url)
+        except ValueError as e:
+            logger.error(f"Validation error extracting post: {str(e)}")
+            return jsonify({'error': str(e)}), 400
+        except Exception as e:
+            logger.error(f"Unexpected error extracting post: {str(e)}", exc_info=True)
+            return jsonify({'error': 'Failed to extract post data. Please check the URL and try again.'}), 500
+            
+        if not post_data:
+            logger.error("No post data returned from extractor")
+            return jsonify({'error': 'Failed to extract post data'}), 400
+            
+        # Store in vector database
+        try:
+            vector_store.add_reddit_post(post_data['id'], post_data)
+            logger.info(f"Successfully stored post {post_data['id']} in vector database")
+        except Exception as e:
+            logger.error(f"Error storing post in vector database: {str(e)}", exc_info=True)
+            # Continue since we can still return the post data even if storage fails
+        
+        # Format timestamp for display
+        try:
+            created_utc = datetime.fromtimestamp(post_data['created_utc']).isoformat()
+        except (TypeError, ValueError):
+            created_utc = post_data['created_utc']
+        
+        # Return post data for display
+        response_data = {
+            'title': post_data['title'],
+            'selftext': post_data['selftext'],
+            'author': post_data['author'],
+            'subreddit': post_data['subreddit'],
+            'created_utc': created_utc,
+            'score': post_data['score'],
+            'num_comments': post_data['num_comments'],
+            'post_id': post_data['id']  # Add post_id to response
+        }
+        
+        logger.info(f"Successfully fetched and processed Reddit post: {post_data['title']}")
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in fetch_reddit_post: {str(e)}", exc_info=True)
+        return jsonify({'error': 'An unexpected error occurred. Please try again.'}), 500
+
+@app.route('/reddit/analyze', methods=['POST'])
+async def analyze_reddit_post():
+    """Second step: Analyze stored Reddit post."""
+    try:
+        data = request.get_json()
+        post_url = data.get('post_url')
+        analysis_type = data.get('analysis_type')
+        model = data.get('model', 'mistral')
+        
+        if not all([post_url, analysis_type]):
+            return jsonify({'error': 'Post URL and analysis type are required'}), 400
+            
+        # Get post data from vector store
+        post_data = reddit_extractor.extract_post(post_url)
+        if not post_data:
+            return jsonify({'error': 'Post not found'}), 404
+            
+        # Run analysis
+        result = await reddit_analyzer.analyze_reddit_post(post_data, analysis_type, model)
+        if not result:
+            return jsonify({'error': 'Analysis failed'}), 500
+            
+        # Store analysis result
+        if result.success:
+            vector_store.add_reddit_analysis(
+                post_id=post_data['id'],
+                analysis_type=analysis_type,
+                model=model,
+                content={'text': result.content, 'metadata': {}}
+            )
+            return jsonify({'content': result.content})
+        else:
+            return jsonify({'error': result.error}), 500
+        
+    except Exception as e:
+        logger.error(f"Error analyzing Reddit post: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/reddit/search', methods=['POST'])
+async def search_reddit_posts():
+    """Search for Reddit posts in the vector store."""
+    try:
+        data = request.get_json()
+        query = data.get('query')
+        n_results = data.get('n_results', 5)
+        
+        if not query:
+            return jsonify({'error': 'No search query provided'}), 400
+            
+        try:
+            results = vector_store.search_reddit(query, n_results=n_results)
+            return jsonify({'results': results})
+            
+        except Exception as e:
+            logger.error(f"Error searching Reddit posts: {str(e)}", exc_info=True)
+            return jsonify({'error': f'Search failed: {str(e)}'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error in search_reddit_posts: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+            
+@app.route('/reddit/post/<post_id>')
+def reddit_post_page(post_id):
+    """Display a single Reddit post and its analyses."""
+    try:
+        # Get post data from vector store
+        posts = vector_store.get_reddit_post(post_id)
+        if not posts:
+            return render_template('error.html', error='Post not found'), 404
+            
+        # Format post data for template
+        post = posts[0] if isinstance(posts, list) else posts
+        formatted_post = {
+            'metadata': {
+                'title': post.get('metadata', {}).get('title'),
+                'author': post.get('metadata', {}).get('author'),
+                'subreddit': post.get('metadata', {}).get('subreddit'),
+                'created_utc': post.get('metadata', {}).get('created_utc'),
+                'score': post.get('metadata', {}).get('score'),
+                'num_comments': post.get('metadata', {}).get('num_comments'),
+                'post_id': post.get('metadata', {}).get('post_id')
+            },
+            'text': post.get('text', '')
+        }
+        
+        # Get all analyses for this post
+        analyses = {
+            'sentiment': {'mistral': [], 'gpt': []},
+            'keywords': {'mistral': [], 'gpt': []},
+            'engagement': {'mistral': [], 'gpt': []},
+            'summary': {'mistral': [], 'gpt': []},
+            'top_comments': {'mistral': [], 'gpt': []},
+            'tools_workflow': {'mistral': [], 'gpt': []},
+            'prompting_patterns': {'mistral': [], 'gpt': []},
+            'code_review': {'mistral': [], 'gpt': []}
+        }
+        
+        # Get analyses from vector store
+        post_analyses = vector_store.get_reddit_post_analyses(post_id)
+        for analysis in post_analyses:
+            analysis_type = analysis.get('metadata', {}).get('analysis_type')
+            model = analysis.get('metadata', {}).get('model')
+            if analysis_type in analyses and model in analyses[analysis_type]:
+                analyses[analysis_type][model].append({
+                    'content': analysis.get('text', ''),
+                    'timestamp': analysis.get('metadata', {}).get('timestamp')
+                })
+        
+        # Sort analyses by timestamp
+        for analysis_type in analyses:
+            for model in analyses[analysis_type]:
+                analyses[analysis_type][model].sort(
+                    key=lambda x: x.get('timestamp', ''),
+                    reverse=True
+                )
+        
+        return render_template(
+            'reddit_post.html',
+            post=formatted_post,
+            analyses=analyses
+        )
+        
+    except Exception as e:
+        logger.error(f"Error displaying Reddit post {post_id}: {str(e)}", exc_info=True)
+        return render_template('error.html', error=str(e)), 500
+
+@app.route('/reddit/library')
+def reddit_library():
+    """Display the Reddit posts library page."""
+    try:
+        # Get all Reddit posts from vector store
+        posts = vector_store.get_all_reddit_posts()
+        
+        # Format posts as a dictionary with post IDs as keys
+        formatted_posts = {}
+        for post in posts:
+            post_id = post['metadata']['post_id']
+            formatted_posts[post_id] = {
+                'metadata': post['metadata'],
+                'text': post['text']
+            }
+            # Get analyses for this post
+            analyses = vector_store.get_reddit_post_analyses(post_id)
+            formatted_posts[post_id]['analyses'] = analyses
+        
+        return render_template(
+            'reddit_library.html',
+            posts=formatted_posts
+        )
+        
+    except Exception as e:
+        logger.error(f"Error loading Reddit library: {str(e)}", exc_info=True)
+        return render_template('reddit_library.html', posts={}, error=str(e))
+
+@app.route('/reddit/delete_post', methods=['POST'])
+def delete_reddit_post():
+    """Delete a Reddit post and all its analyses."""
+    try:
+        data = request.get_json()
+        post_id = data.get('post_id')
+        
+        if not post_id:
+            return jsonify({'error': 'No post ID provided'}), 400
+            
+        try:
+            # Delete from vector store
+            vector_store.delete_reddit_post(post_id)
+            
+            # Delete post directory
+            post_dir = os.path.join(app.config['UPLOAD_FOLDER'], f"reddit_{post_id}")
+            if os.path.exists(post_dir):
+                for filename in os.listdir(post_dir):
+                    filepath = os.path.join(post_dir, filename)
+                    try:
+                        os.remove(filepath)
+                    except Exception as e:
+                        logger.error(f"Error deleting file {filepath}: {str(e)}")
+                os.rmdir(post_dir)
+            
+            return jsonify({'success': True})
+            
+        except Exception as e:
+            logger.error(f"Error deleting Reddit post: {str(e)}", exc_info=True)
+            return jsonify({'error': f'Failed to delete post: {str(e)}'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error in delete_reddit_post: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
+@app.route('/reddit/delete_analysis', methods=['POST'])
+def delete_reddit_analysis():
+    """Delete a specific Reddit post analysis."""
+    try:
+        data = request.get_json()
+        filepath = data.get('filepath')
+        
+        if not filepath:
+            return jsonify({'error': 'No filepath provided'}), 400
+            
+        try:
+            # Verify the file exists and is within the upload folder
+            abs_filepath = os.path.abspath(filepath)
+            if not abs_filepath.startswith(os.path.abspath(app.config['UPLOAD_FOLDER'])):
+                return jsonify({'error': 'Invalid filepath'}), 400
+                
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                return jsonify({'success': True})
+            else:
+                return jsonify({'error': 'File not found'}), 404
+                
+        except Exception as e:
+            logger.error(f"Error deleting analysis file: {str(e)}", exc_info=True)
+            return jsonify({'error': f'Failed to delete analysis: {str(e)}'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error in delete_reddit_analysis: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 if __name__ == '__main__':
     logger.info("Starting Flask application")
